@@ -64,7 +64,7 @@ public sealed class PostgresFixture : IAsyncLifetime
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(sql, connection);
-        return Convert.ToInt64(await command.ExecuteScalarAsync());
+        return Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>First column of the first row on the catalog DB, as text.</summary>

@@ -68,10 +68,12 @@ public static class Totp
             Array.Reverse(message);
         }
 
+#pragma warning disable CA5350 // RFC 6238 TOTP mandates HMAC-SHA1
         var hash = HMACSHA1.HashData(Base32(base32Key), message);
+#pragma warning restore CA5350
         var offset = hash[^1] & 0x0F;
         var value = ((hash[offset] & 0x7F) << 24) | (hash[offset + 1] << 16) | (hash[offset + 2] << 8) | hash[offset + 3];
-        return (value % 1_000_000).ToString("D6");
+        return (value % 1_000_000).ToString("D6", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static byte[] Base32(string text)

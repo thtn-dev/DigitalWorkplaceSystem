@@ -5,7 +5,7 @@ namespace Shell.IntegrationTests;
 
 /// <summary>Pool isolation rules of <see cref="TenantDbContext"/>, on a dedicated database.</summary>
 [Collection(PostgresCollection.Name)]
-public class TenantDbContextTests(PostgresFixture db) : IAsyncLifetime
+public sealed class TenantDbContextTests(PostgresFixture db) : IAsyncLifetime
 {
     private static readonly TenantInfo TenantA = new(Guid.CreateVersion7(), "a.test", false, null, true);
     private static readonly TenantInfo TenantB = new(Guid.CreateVersion7(), "b.test", false, null, true);

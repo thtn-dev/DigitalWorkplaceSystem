@@ -55,8 +55,11 @@ internal static class AuthorizationEndpoints
         {
             return request.HasPromptValue(PromptValues.None)
                 ? Deny(Errors.LoginRequired, "The user is not signed in.")
-                : Results.Challenge(new AuthenticationProperties { RedirectUri = context.Request.PathBase + context.Request.Path + QueryString.Create(
-                    context.Request.HasFormContentType ? context.Request.Form : context.Request.Query) }, [IdentityConstants.ApplicationScheme]);
+                : Results.Challenge(new AuthenticationProperties
+                {
+                    RedirectUri = context.Request.PathBase + context.Request.Path + QueryString.Create(
+                    context.Request.HasFormContentType ? context.Request.Form : context.Request.Query)
+                }, [IdentityConstants.ApplicationScheme]);
         }
 
         var user = await users.GetUserAsync(session.Principal);

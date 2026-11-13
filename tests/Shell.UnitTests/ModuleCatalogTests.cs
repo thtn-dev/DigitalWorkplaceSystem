@@ -82,7 +82,7 @@ public class ModuleCatalogTests
         Assert.Single(catalog.Modules, m => m.Id == "products");
     }
 
-    private static IModule Module(string id, params string[] dependsOn) => new FakeModule(id, dependsOn);
+    private static FakeModule Module(string id, params string[] dependsOn) => new(id, dependsOn);
 
     private sealed class FakeModule(string id, IReadOnlyList<string> dependsOn) : IModule
     {

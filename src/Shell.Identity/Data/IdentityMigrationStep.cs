@@ -91,7 +91,12 @@ internal sealed class DemoUserSeeder(
         {
             db.Memberships.Add(new TenantMembership
             {
-                TenantId = tenantId, UserId = user.Id, Role = role, Status = MembershipStatus.Active, CreatedAt = now, UpdatedAt = now,
+                TenantId = tenantId,
+                UserId = user.Id,
+                Role = role,
+                Status = MembershipStatus.Active,
+                CreatedAt = now,
+                UpdatedAt = now,
             });
         }
     }

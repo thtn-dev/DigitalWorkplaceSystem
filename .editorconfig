@@ -1,0 +1,32 @@
+root = true
+
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{csproj,props,targets,slnx,json,yml,yaml}]
+indent_size = 2
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_prefer_braces = true:warning
+# Standard structured logging is used across the solution instead of LoggerMessage source-gen delegates.
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA1873.severity = none
+
+# EF Core migrations are tool-generated.
+[**/Migrations/*.cs]
+generated_code = true
+
+# Razor Page handlers must be instance methods for ASP.NET Core page routing.
+[**/Pages/**/*.cshtml.cs]
+dotnet_diagnostic.CA1822.severity = none
+
+# Test projects use snake_case Fact/Theory names, xUnit *Collection suffix conventions, and instance fixture helpers.
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1711.severity = none
+dotnet_diagnostic.CA1822.severity = none

@@ -22,7 +22,7 @@ public sealed class ExternalLoginModel(SignInManager<User> signIn, UserManager<U
 
     public async Task<IActionResult> OnPostAsync(string provider, string? returnUrl)
     {
-        if (!(await signIn.GetExternalAuthenticationSchemesAsync()).Any(s => s.Name == provider))
+        if ((await signIn.GetExternalAuthenticationSchemesAsync()).All(s => s.Name != provider))
         {
             return RedirectToPage("Login");
         }

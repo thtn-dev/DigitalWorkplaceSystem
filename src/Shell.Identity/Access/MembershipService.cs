@@ -259,7 +259,12 @@ public sealed class MembershipService(
         {
             db.Memberships.Add(new TenantMembership
             {
-                TenantId = invitation.TenantId, UserId = user.Id, Role = invitation.Role, Status = MembershipStatus.Active, CreatedAt = now, UpdatedAt = now,
+                TenantId = invitation.TenantId,
+                UserId = user.Id,
+                Role = invitation.Role,
+                Status = MembershipStatus.Active,
+                CreatedAt = now,
+                UpdatedAt = now,
             });
         }
         else
