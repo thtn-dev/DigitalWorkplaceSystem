@@ -75,6 +75,7 @@ try
     }
 
     app.UseForwardedHeaders();
+    app.UseSecurityHeaders();
 
     if (app.Environment.IsDevelopment())
     {

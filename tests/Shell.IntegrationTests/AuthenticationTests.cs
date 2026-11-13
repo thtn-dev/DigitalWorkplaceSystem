@@ -177,6 +177,46 @@ public class AuthenticationTests(PostgresFixture db)
         Assert.Equal(HttpStatusCode.NotFound, (await tenantHost.GetAsync("/.well-known/openid-configuration", TestContext.Current.CancellationToken)).StatusCode);
     }
 
+    [Fact]
+    public async Task Responses_include_clickjacking_and_sniffing_protection_headers()
+    {
+        await using var host = db.CreateHost();
+        var authClient = host.CreateClient(new() { BaseAddress = new Uri($"http://{ShellHostFactory.AuthHost}") });
+        var apiClient = host.CreateClient(new() { BaseAddress = new Uri($"http://{TenantA}") });
+
+        var loginResponse = await authClient.GetAsync("/account/login", TestContext.Current.CancellationToken);
+        var apiResponse = await apiClient.GetAsync("/api/products", TestContext.Current.CancellationToken);
+
+        foreach (var response in new[] { loginResponse, apiResponse })
+        {
+            Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+            Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").Single());
+            Assert.Equal("strict-origin-when-cross-origin", response.Headers.GetValues("Referrer-Policy").Single());
+            var csp = response.Headers.GetValues("Content-Security-Policy").Single();
+            Assert.Contains("frame-ancestors 'none'", csp);
+            Assert.Contains("style-src 'self' 'unsafe-inline'", csp);
+            Assert.Contains("form-action 'self'", csp);
+            Assert.False(response.Headers.Contains("Strict-Transport-Security"));
+        }
+    }
+
+    [Fact]
+    public async Task Hsts_is_emitted_when_https_is_required_and_swagger_skips_csp()
+    {
+        await using var host = db.CreateHost(new Dictionary<string, string?>
+        {
+            ["Identity:RequireHttps"] = "true",
+        });
+        var authClient = host.CreateClient(new() { BaseAddress = new Uri($"https://{ShellHostFactory.AuthHost}") });
+
+        var loginResponse = await authClient.GetAsync("/account/login", TestContext.Current.CancellationToken);
+        Assert.Equal("max-age=31536000; includeSubDomains", loginResponse.Headers.GetValues("Strict-Transport-Security").Single());
+
+        var swaggerResponse = await authClient.GetAsync("/swagger/index.html", TestContext.Current.CancellationToken);
+        Assert.Equal("nosniff", swaggerResponse.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.False(swaggerResponse.Headers.Contains("Content-Security-Policy"));
+    }
+
     private Task SetMembershipStatusAsync(string email, Guid tenantId, string status) => db.ExecuteAsync($"""
         UPDATE identity.tenant_memberships SET status = '{status}'
         WHERE tenant_id = '{tenantId}' AND user_id = (SELECT id FROM identity.users WHERE email = '{email}')
