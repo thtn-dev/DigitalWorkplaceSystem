@@ -21,6 +21,7 @@ try
     // One-shot commands, run instead of the web host (see IdentityCommands for the account/tenant ones):
     //   migrate                                                        migrate (and optionally seed) the databases; never done on normal start-up
     //   disable-user <email> | enable-user <email>                     block/allow sign-in and revoke every grant
+    //   grant-admin <email> | revoke-admin <email>                     grant/revoke platform admin role
     //   create-tenant <name> <domain> <owner-email> [--silo <cs>]      create a Pool or Silo tenant and assign/invite its owner
     var (commandArgs, hostArgs) = ParseCliArgs(args);
     var builder = WebApplication.CreateBuilder(hostArgs);
@@ -126,7 +127,7 @@ public partial class Program
     public static (string[]? CommandArgs, string[] HostArgs) ParseCliArgs(string[] args) => args switch
     {
         ["migrate", .. var rest] => (["migrate"], rest),
-        [var name and ("disable-user" or "enable-user"), var value, .. var rest] => ([name, value], rest),
+        [var name and ("disable-user" or "enable-user" or "grant-admin" or "revoke-admin"), var value, .. var rest] => ([name, value], rest),
         ["create-tenant", ..] => (args, []),
         _ => (null, args),
     };

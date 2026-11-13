@@ -561,6 +561,10 @@ namespace Shell.Identity.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("is_disabled");
 
+                    b.Property<bool>("IsPlatformAdmin")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_platform_admin");
+
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("boolean")
                         .HasColumnName("lockout_enabled");

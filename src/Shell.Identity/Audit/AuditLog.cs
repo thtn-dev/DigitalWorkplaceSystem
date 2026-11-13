@@ -28,6 +28,12 @@ public static class AuditEvents
     public const string InvitationAccepted = "invitation.accepted";
     public const string EmailConfirmed = "user.email_confirmed";
     public const string TenantCreated = "tenant.created";
+    public const string PlatformAdminGranted = "platform_admin.granted";
+    public const string PlatformAdminRevoked = "platform_admin.revoked";
+    public const string TenantLocked = "tenant.locked";
+    public const string TenantUnlocked = "tenant.unlocked";
+    public const string TenantDomainAdded = "tenant.domain_added";
+    public const string TenantDomainRemoved = "tenant.domain_removed";
 }
 
 /// <summary>

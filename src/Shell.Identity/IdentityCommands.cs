@@ -6,7 +6,7 @@ using Shell.Identity.Tenants;
 namespace Shell.Identity;
 
 /// <summary>
-/// Platform CLI commands of the host: <c>disable-user</c>, <c>enable-user</c>, and <c>create-tenant</c>. Exit code 0 on success.
+/// Platform CLI commands of the host: <c>disable-user</c>, <c>enable-user</c>, <c>grant-admin</c>, <c>revoke-admin</c>, and <c>create-tenant</c>. Exit code 0 on success.
 /// </summary>
 public static class IdentityCommands
 {
@@ -29,6 +29,20 @@ public static class IdentityCommands
             }
 
             logger.LogInformation("Account {Email} {State}", email, disable ? "disabled, all grants revoked" : "enabled");
+            return 0;
+        }
+
+        if (args is [var adminCmd and ("grant-admin" or "revoke-admin"), var adminEmail, ..])
+        {
+            var accounts = scope.ServiceProvider.GetRequiredService<UserAccountService>();
+            var grant = adminCmd == "grant-admin";
+            if (!await accounts.SetPlatformAdminAsync(adminEmail, grant, actorId: null, ct))
+            {
+                logger.LogError("No account with email {Email}", adminEmail);
+                return 1;
+            }
+
+            logger.LogInformation("Account {Email} {State}", adminEmail, grant ? "granted platform admin" : "revoked platform admin");
             return 0;
         }
 

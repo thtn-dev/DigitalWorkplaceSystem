@@ -1,6 +1,7 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -111,6 +112,7 @@ public static class ShellIdentityExtensions
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             })
             .AddSignInManager()
+            .AddClaimsPrincipalFactory<PlatformAdminClaimsPrincipalFactory>()
             .AddEntityFrameworkStores<AuthDbContext>()
             .AddDefaultTokenProviders();
 
@@ -135,6 +137,28 @@ public static class ShellIdentityExtensions
                         cookie.LogoutPath = "/account/logout";
                         cookie.ExpireTimeSpan = TimeSpan.FromHours(8);
                         cookie.SlidingExpiration = true;
+                        cookie.Events.OnRedirectToLogin = ctx =>
+                        {
+                            if (ctx.Request.Path.StartsWithSegments("/admin"))
+                            {
+                                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                                return Task.CompletedTask;
+                            }
+
+                            ctx.Response.Redirect(ctx.RedirectUri);
+                            return Task.CompletedTask;
+                        };
+                        cookie.Events.OnRedirectToAccessDenied = ctx =>
+                        {
+                            if (ctx.Request.Path.StartsWithSegments("/admin"))
+                            {
+                                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                                return Task.CompletedTask;
+                            }
+
+                            ctx.Response.Redirect(ctx.RedirectUri);
+                            return Task.CompletedTask;
+                        };
                     }
                 });
         }
@@ -215,6 +239,9 @@ public static class ShellIdentityExtensions
         services.AddScoped<MembershipService>();
         services.AddScoped<UserAccountService>();
         services.AddScoped<TenantProvisioningService>();
+        services.AddScoped<IAuthorizationHandler, PlatformAdminHandler>();
+        services.AddAuthorizationBuilder()
+            .AddPolicy(PlatformPolicies.Admin, policy => policy.RequireAuthenticatedUser().AddRequirements(new PlatformAdminRequirement()));
         services.AddScoped<AuditLog>();
         services.AddSingleton<AccountLinks>();
         services.TryAddSingleton<IAccountEmailSender>(sp =>

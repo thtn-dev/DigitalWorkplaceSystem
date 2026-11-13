@@ -102,6 +102,9 @@ public sealed class User : IdentityUser<Guid>
     /// <summary>Disabled accounts cannot sign in nor use any token.</summary>
     public bool IsDisabled { get; set; }
 
+    /// <summary>Platform operators allowed to call <c>/admin/*</c> on the authorization server host.</summary>
+    public bool IsPlatformAdmin { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }
 

@@ -20,13 +20,33 @@ public sealed class UserAccountService(
     public async Task<bool> SetDisabledAsync(string email, bool disabled, CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(email);
+        return user is not null && await SetDisabledCoreAsync(user, disabled, actorId: null, ct);
+    }
+
+    public async Task<bool> SetDisabledByIdAsync(Guid userId, bool disabled, Guid? actorId, CancellationToken ct)
+    {
+        var user = await users.FindByIdAsync(userId.ToString());
+        return user is not null && await SetDisabledCoreAsync(user, disabled, actorId, ct);
+    }
+
+    public async Task<bool> SetPlatformAdminAsync(string email, bool isPlatformAdmin, Guid? actorId, CancellationToken ct)
+    {
+        var user = await users.FindByEmailAsync(email);
         if (user is null)
         {
             return false;
         }
 
+        user.IsPlatformAdmin = isPlatformAdmin;
+        audit.Add(isPlatformAdmin ? AuditEvents.PlatformAdminGranted : AuditEvents.PlatformAdminRevoked, user.Id, actorId: actorId);
+        await users.UpdateSecurityStampAsync(user); // Saves the user and the audit event.
+        return true;
+    }
+
+    private async Task<bool> SetDisabledCoreAsync(User user, bool disabled, Guid? actorId, CancellationToken ct)
+    {
         user.IsDisabled = disabled;
-        audit.Add(disabled ? AuditEvents.UserDisabled : AuditEvents.UserEnabled, user.Id);
+        audit.Add(disabled ? AuditEvents.UserDisabled : AuditEvents.UserEnabled, user.Id, actorId: actorId);
         await users.UpdateSecurityStampAsync(user); // Saves the user and the audit event.
 
         if (disabled)
