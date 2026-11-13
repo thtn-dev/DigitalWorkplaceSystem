@@ -82,8 +82,8 @@ src/
     Tenancy/                 CatalogDbContext, TenantStore (cache), TenantResolutionMiddleware, DemoTenantSeeder
     Data/                    MigrationRunner (lệnh migrate), DatabaseHealthCheck
   Shell.Identity/          Authorization server (OpenIddict + Identity trên auth host),
-                           Razor Pages (/account/*), Bearer validation + TenantAccessMiddleware,
-                           IAM (/iam/*), audit log, Data Protection keys, CLI disable-user/enable-user
+                           Razor Pages (/account/*, /tenants/new), Bearer validation + TenantAccessMiddleware,
+                           IAM (/iam/*), audit log, Data Protection keys, TenantProvisioningService, CLI disable-user/enable-user/create-tenant
   Modules/
     Products/                Module mẫu: Product (IMustHaveTenant), ProductsDbContext, /api/products
     Products.Contracts/      DTO công khai cho module khác
@@ -102,7 +102,7 @@ Dockerfile, docker-compose.yml, Directory.Build.props, Directory.Packages.props,
 | `GET /health/live` | Mọi host | Process còn sống |
 | `GET /health/ready` | Mọi host | DB Catalog và DB chung trả lời, lỗi → 503 |
 | `/swagger` | Mọi host (chỉ Development) | Swagger UI |
-| `/connect/*`, `/account/*` | **Chỉ Auth host** (`Identity:Issuer`) | OIDC Authorization Code + PKCE, đăng nhập, MFA, lời mời, quên mật khẩu |
+| `/connect/*`, `/account/*`, `/invitations/*`, `/tenants/*` | **Chỉ Auth host** (`Identity:Issuer`) | OIDC Authorization Code + PKCE, đăng nhập, xác nhận email, MFA, lời mời, quên mật khẩu, tạo workspace dùng thử (`/tenants/new`) |
 | `/iam/members`, `/iam/invitations`, `/iam/audit` | **Tenant host** (policy `tenant-admin`) | Quản lý thành viên, lời mời, audit log đăng nhập của tenant |
 | `/api/{moduleId}/...` | **Tenant host** (cần token + membership) | Endpoint nghiệp vụ, ví dụ `/api/products` |
 
@@ -126,6 +126,8 @@ Request cần tenant: domain không có trong Catalog → **404**, tenant bị k
 | `Identity:RefreshTokenDays` | 14 | Thời hạn refresh token (ngày) |
 | `Identity:MembershipCacheSeconds` | 30 | Cache kiểm tra membership trên API instance (trễ tối đa khi thu hồi quyền) |
 | `Identity:RateLimitPerMinute` | 60 | Giới hạn request/phút/IP cho endpoint đăng nhập & OIDC trên mỗi instance |
+| `Identity:SelfSignUpBaseDomain` | `"localhost"` | Hậu tố domain gắn cho workspace khi khách tự đăng ký tại `/tenants/new` (`<slug>.<BaseDomain>`) |
+| `Identity:MaxTenantsPerUser` | `3` | Số lượng workspace tối đa một tài khoản được sở hữu qua self sign-up |
 | `Identity:Clients:RedirectUris` | `["https://{domain}/signin-callback"]` | Mẫu redirect URI cho OAuth client của từng tenant |
 | `Identity:Keys:Path` | `"keys"` | Thư mục chứa cert ký/mã hoá token (`signing-*.pfx`, `encryption-*.pfx`) |
 | `Identity:Keys:AutoGenerate` | `false` | Tự sinh cert self-signed khi trống (chỉ dùng cho dev/demo) |
@@ -142,8 +144,9 @@ Request cần tenant: domain không có trong Catalog → **404**, tenant bị k
 ## Lưu ý vận hành
 
 - **Xác thực & cách ly tenant:** `Shell.Identity` cấp access token gắn `tenant_id` qua Authorization Code + PKCE trên Auth host (`Identity:Issuer`). Các tenant host xác thực Bearer token và kiểm tra membership đang hoạt động (`tenant-member` / `tenant-admin`). Dùng `dotnet Host.dll disable-user <email>` / `enable-user <email>` để khoá/mở tài khoản khẩn cấp.
+- **Tạo tenant mới:** Dùng `dotnet Host.dll create-tenant "<Name>" <domain> <owner-email> [--silo "<connection-string>"]` (tự tạo catalog, migrate DB Silo nếu có, đồng bộ OAuth client và gán/mời owner); hoặc người dùng đã xác nhận email có thể tự tạo workspace Pool dùng thử tại `/tenants/new` trên Auth host.
 - Thêm/khoá tenant hoặc đổi domain trong Catalog: mỗi instance thấy thay đổi sau tối đa `CacheMinutes` (domain mới bị 404 trước đó: tối đa `NotFoundCacheSeconds`).
-- Thêm tenant Silo: tạo dòng trong Catalog rồi chạy `migrate`. Lệnh này tự tạo DB riêng và migrate mọi module trên DB đó.
+- Thêm tenant Silo thủ công hoặc qua CLI: nếu tạo dòng trong Catalog rồi chạy `migrate` (hoặc dùng `create-tenant --silo`), hệ thống tự tạo DB riêng và migrate mọi module trên DB đó.
 - Migration **không** tự chạy khi khởi động: chạy `dotnet Host.dll migrate` (hoặc `docker run <image> migrate`) trước khi deploy.
 - Khi `migrate` tạo database mới, EF Core log vài dòng `Failed executing DbCommand` / `An error occurred using the connection...`: đó là lúc EF kiểm tra DB và bảng lịch sử *trước khi tạo*. Migration vẫn thành công, lần sau không còn.
 - Connection string của tenant Silo đang lưu dạng plain text trong Catalog. Xem phần secret store trong [extension-points.md](extension-points.md).

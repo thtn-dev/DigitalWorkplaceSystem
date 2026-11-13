@@ -31,6 +31,14 @@ public sealed class ShellIdentityOptions
     [Range(1, 100_000)]
     public int RateLimitPerMinute { get; set; } = 60;
 
+    /// <summary>Base domain appended to customer-chosen subdomain slugs during self sign-up (e.g. <c>localhost</c> or <c>app.com</c>).</summary>
+    [Required]
+    public string SelfSignUpBaseDomain { get; set; } = "localhost";
+
+    /// <summary>Maximum number of workspaces a single user may own via self sign-up.</summary>
+    [Range(1, 100)]
+    public int MaxTenantsPerUser { get; set; } = 3;
+
     public ClientOptions Clients { get; set; } = new();
 
     /// <summary>Social login providers for personal accounts. A provider is enabled when its client id is set.</summary>

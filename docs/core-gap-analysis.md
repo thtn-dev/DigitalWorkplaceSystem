@@ -44,7 +44,7 @@ Cái còn thiếu nằm ở ba nhóm:
 
 | ID | Thiếu gì | Hiện trạng | Đề xuất | Ưu tiên | Công sức |
 |---|---|---|---|---|---|
-| **T1** | **Provisioning tenant** | Chỉ có `DemoTenantSeeder`. Tenant thật phải `INSERT` vào `catalog.tenants`/`tenant_domains` bằng SQL rồi chạy `migrate` để đăng ký OAuth client (`TenantClientSynchronizer` chỉ chạy trong `IdentityMigrationStep`). Owner đầu tiên cũng phải chèn tay vào `identity.tenant_memberships`. | Một service + CLI (`create-tenant`) và/hoặc API admin: tạo tenant + domain + OAuth client + mời owner đầu tiên; với Silo thì tạo DB và migrate riêng tenant đó (tách `MigrationRunner` thành "migrate một tenant"). | P0 | M |
+| **T1** | **Provisioning tenant** | ✅ Đã hoàn thành ở Đợt 1B (`TenantProvisioningService`, `MigrationRunner.MigrateTenantAsync`, `TenantClientSynchronizer.SynchronizeTenantAsync`, `TenantStore.Invalidate`, CLI `create-tenant`, xác nhận email `/account/confirm-email` và self sign-up `/tenants/new`). | Đã hoàn thành. | P0 | M |
 | **T2** | **Platform admin (super admin)** | Không có vai trò cấp nền tảng. Thao tác hệ thống duy nhất là CLI `disable-user`/`enable-user`. | Vai trò platform admin (claim/bảng riêng), khu vực quản trị trên auth host hoặc host admin riêng: danh sách tenant, khoá/mở, domain, user. | P0 | M |
 | **T3** | Bảo mật connection string Silo | Lưu plain text trong `catalog.tenants.connection_string` (đã ghi trong extension-points). | Lưu tên secret, resolve qua secret store (Key Vault/Vault/AWS SM) trong `TenantStore`; ít nhất mã hoá bằng Data Protection. | P0 (nếu có Silo thật) | M |
 | **T4** | Vô hiệu cache tenant tức thời | Khoá tenant/đổi domain mất tới `CacheMinutes` (10') mới có hiệu lực trên mọi instance. | Postgres `LISTEN/NOTIFY` hoặc Redis pub/sub → xoá cache key. Cần khi có T1/T2. | P1 | S–M |
@@ -133,7 +133,7 @@ Gom theo đợt, mỗi đợt là một kế hoạch riêng:
 1. **Đợt 0 – Dọn nền (nhanh, rẻ):** `E1` CI, `E2` docs, `I2` security headers, `E4` (phần `ArchitectureTests` tự quét `Modules.*.dll`), `E3` `.editorconfig` & analyzer.
 2. **Đợt 1 – Vận hành & Onboarding tenant** (chia thành 3 kế hoạch nhỏ làm lần lượt):
    - **Đợt 1A – Hạ tầng Test & Email:** `B13` tách project `Shell.Testing` → `I1` gửi email thật (SMTP + Mailpit dev).
-   - **Đợt 1B – Provisioning & Self Sign-up Tenant:** `T1` tách migrate/sync đơn tenant, CLI `create-tenant`, xác minh email tài khoản và luồng khách tự tạo Pool tenant dùng thử tại `/tenants/new`.
+   - **Đợt 1B – Provisioning & Self Sign-up Tenant:** ✅ Đã hoàn thành (`T1`: tách migrate/sync đơn tenant, CLI `create-tenant`, xác minh email tài khoản và luồng khách tự tạo Pool tenant dùng thử tại `/tenants/new`).
    - **Đợt 1C – Quản trị nền tảng & Đồng bộ Cache:** `T2` Platform Admin (Minimal API `/admin/*` trên auth host + CLI `grant-admin`/`revoke-admin`) → `T4` vô hiệu cache tenant/membership tức thời qua Postgres `LISTEN/NOTIFY`.
 3. **Đợt 2 – Building blocks cho module** (làm trước khi viết module thật thứ hai): `B1`, `B2`, `B3`, `B4`, `B5`, `B10`, `E4` (template tạo module); sau đó `B7` phân quyền chi tiết (kiểm tra theo permission, ánh xạ từ role cố định và mở rộng được sang custom role).
 4. **Đợt 3 – Bất đồng bộ & vận hành dài hạn:** `B9` background job → `I3` prune token, `O4` giám sát DB Silo; `B8` event + outbox.

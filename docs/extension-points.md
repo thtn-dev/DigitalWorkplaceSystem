@@ -15,7 +15,8 @@ Những điểm mở rộng còn lại trên nền `Shell.Identity`:
 
 ## 2. Quản lý tenant
 
-- **API quản trị tenant** (tạo tenant, gán domain, khoá, chuyển Pool ↔ Silo): thêm endpoint trong Shell.Core dùng `CatalogDbContext`, có phân quyền riêng. Tạo tenant Silo xong thì chạy `migrate` (hoặc gọi `MigrationRunner` cho đúng tenant đó).
+- **Provisioning & Self Sign-up (đã có trong `Shell.Identity`):** `TenantProvisioningService` hỗ trợ tạo tenant Pool hoặc Silo kèm đồng bộ OAuth client và gán/mời owner qua CLI `create-tenant "<Name>" <domain> <owner-email> [--silo "<cs>"]`; người dùng đã xác nhận email cũng có thể tự tạo trial Pool workspace tại `/tenants/new`.
+- **API quản trị tenant (Platform Admin `/admin/*`)**: bổ sung endpoint trên auth host dùng `CatalogDbContext` + role platform admin (Đợt 1C). Tạo tenant Silo xong thì gọi `MigrationRunner.MigrateTenantAsync` cho đúng tenant đó.
 - **Đồng bộ cache tenant tức thời giữa instance**: hiện mỗi instance tự hết hạn sau `CacheMinutes`. Muốn tức thời: Postgres `LISTEN/NOTIFY` (hoặc Redis pub/sub), khi nhận thông báo thì `IMemoryCache.Remove($"tenant:{domain}")`.
 - **Connection string Silo**: đang lưu plain text trong `catalog.tenants`. Nên lưu tên secret (Key Vault, AWS Secrets Manager, Vault) và resolve trong `TenantStore` (kết quả được cache sẵn).
 - **Nhiều tenant Silo**: `MigrationRunner` đang migrate tuần tự. Có thể chạy song song có giới hạn (`Parallel.ForEachAsync` + `MaxDegreeOfParallelism`) hoặc tách thành job theo từng tenant.

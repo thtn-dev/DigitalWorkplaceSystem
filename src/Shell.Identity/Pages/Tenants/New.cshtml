@@ -1,0 +1,38 @@
+@page "/tenants/new"
+@model Shell.Identity.Pages.Tenants.NewTenantModel
+@{
+    ViewData["Title"] = "Create a workspace";
+}
+<h1>Create a workspace</h1>
+
+@if (Model.Error is not null)
+{
+    <div class="error" role="alert">@Model.Error</div>
+}
+
+@if (Model.CreatedDomain is not null)
+{
+    <div id="tenant-created" class="ok">
+        Workspace <strong>@Model.Name</strong> is ready at <code>@Model.CreatedDomain</code> (ID: <code>@Model.CreatedTenantId</code>).
+    </div>
+    <p class="links"><a href="/">Back to account</a></p>
+}
+else
+{
+    @if (!Model.EmailConfirmed)
+    {
+        <div id="email-unconfirmed" class="error" role="alert">
+            Please confirm your email address before creating a workspace.
+        </div>
+    }
+    <form method="post">
+        <label for="name">Workspace name</label>
+        <input id="name" name="Name" type="text" value="@Model.Name" required maxlength="200" />
+
+        <label for="subdomain">Subdomain (<code>&lt;subdomain&gt;.@Model.BaseDomain</code>)</label>
+        <input id="subdomain" name="Subdomain" type="text" value="@Model.Subdomain" required maxlength="63" pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" />
+
+        <button type="submit">Create workspace</button>
+    </form>
+    <p class="links"><a href="/">Back to account</a></p>
+}

@@ -209,6 +209,63 @@ public class TenancyTests(PostgresFixture db)
         Assert.Equal(1, await IdentityCommands.RunAsync(host.Services, ["create-tenant", "AuthHost", ShellHostFactory.AuthHost, DemoUserSeeder.Bob], Ct));
     }
 
+    [Fact]
+    public async Task Public_self_signup_requires_confirmed_email_enforces_reserved_slugs_and_quota_and_provisions_trial_pool_tenant()
+    {
+        await using var host = db.CreateHost(new Dictionary<string, string?>
+        {
+            ["Identity:SelfSignUpBaseDomain"] = "localhost",
+            ["Identity:MaxTenantsPerUser"] = "1",
+        });
+        var client = host.CreateClient();
+        var email = $"signup-{Guid.NewGuid():N}@test.local";
+        var browser = new OidcTestClient(host);
+        await browser.RegisterAsync(email, DemoUserSeeder.Password);
+        var confirmLink = db.Emails.LastLinkTo(email);
+
+        // 1. /tenants/new is an auth-host-only route: tenant hosts get 404.
+        Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(client, HttpMethod.Get, "/tenants/new", TenantA)).StatusCode);
+
+        // 2. Unconfirmed user cannot provision a workspace.
+        var slug = $"trial-{Guid.NewGuid():N}"[..20];
+        var unconfirmedPost = await browser.PostFormAsync(
+            "/tenants/new",
+            new() { ["Name"] = "Unconfirmed Co", ["Subdomain"] = slug },
+            tokenPage: "/tenants/new");
+        Assert.Contains("confirm your email", await unconfirmedPost.Content.ReadAsStringAsync(Ct), StringComparison.OrdinalIgnoreCase);
+
+        // 3. Confirm email, then verify reserved slugs ("auth", "admin") are rejected.
+        Assert.Contains("id=\"email-confirmed\"", await browser.GetPageAsync(confirmLink));
+        var reservedPost = await browser.PostFormAsync(
+            "/tenants/new",
+            new() { ["Name"] = "Reserved Co", ["Subdomain"] = "admin" },
+            tokenPage: "/tenants/new");
+        Assert.Contains("reserved", await reservedPost.Content.ReadAsStringAsync(Ct), StringComparison.OrdinalIgnoreCase);
+
+        // 4. Valid slug provisions Pool tenant "<slug>.localhost", registers OAuth client, and grants owner membership.
+        var createdPost = await browser.PostFormAsync(
+            "/tenants/new",
+            new() { ["Name"] = "Trial Workspace", ["Subdomain"] = slug },
+            tokenPage: "/tenants/new");
+        var createdHtml = await createdPost.Content.ReadAsStringAsync(Ct);
+        var expectedDomain = $"{slug}.localhost";
+        Assert.Contains("id=\"tenant-created\"", createdHtml);
+        Assert.Contains(expectedDomain, createdHtml);
+
+        var tenantId = await db.TenantIdAsync(expectedDomain);
+        var tokens = await browser.GetTokensAsync(email, DemoUserSeeder.Password, tenantId, expectedDomain);
+        var product = await CreateProductAsync(client, expectedDomain, $"trial-prod-{Guid.NewGuid()}", tokens.AccessToken);
+        Assert.NotEqual(Guid.Empty, product.Id);
+
+        // 5. Quota (MaxTenantsPerUser = 1) blocks creating a second workspace.
+        var secondSlug = $"second-{Guid.NewGuid():N}"[..20];
+        var quotaPost = await browser.PostFormAsync(
+            "/tenants/new",
+            new() { ["Name"] = "Second Workspace", ["Subdomain"] = secondSlug },
+            tokenPage: "/tenants/new");
+        Assert.Contains("at most 1", await quotaPost.Content.ReadAsStringAsync(Ct), StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<string> AliceTokenAsync(OidcTestClient browser, string domain) =>
         (await browser.GetTokensAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, await db.TenantIdAsync(domain), domain)).AccessToken!;
 

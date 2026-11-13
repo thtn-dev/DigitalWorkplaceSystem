@@ -43,8 +43,14 @@ public sealed partial class TenantProvisioningService(
     TenantClientSynchronizer clients,
     AuditLog audit,
     TimeProvider time,
-    IOptions<TenancyOptions> tenancyOptions)
+    IOptions<TenancyOptions> tenancyOptions,
+    IOptions<ShellIdentityOptions> identityOptions)
 {
+    private static readonly HashSet<string> ReservedSubdomains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "auth", "admin", "api", "www", "mail", "status", "health", "system", "platform", "billing", "support",
+    };
+
     public async Task<TenantProvisioningResult> ProvisionAsync(
         string name,
         string domain,
@@ -163,6 +169,52 @@ public sealed partial class TenantProvisioningService(
         return new(TenantProvisioningOutcome.Ok, TenantId: tenant.Id, Domain: domain);
     }
 
+    /// <summary>Self-service creation of a trial Pool tenant under <c>&lt;slug&gt;.&lt;SelfSignUpBaseDomain&gt;</c> by a confirmed personal account.</summary>
+    public async Task<TenantProvisioningResult> CreateTrialAsync(User owner, string name, string subdomainSlug, CancellationToken ct)
+    {
+        if (owner.IsDisabled)
+        {
+            return new(TenantProvisioningOutcome.Forbidden, "This account is disabled.");
+        }
+
+        if (owner.ManagedByTenantId is not null)
+        {
+            return new(TenantProvisioningOutcome.Forbidden, "An account managed by an organization cannot create a workspace.");
+        }
+
+        if (!owner.EmailConfirmed || string.IsNullOrWhiteSpace(owner.Email))
+        {
+            return new(TenantProvisioningOutcome.Forbidden, "Please confirm your email address before creating a workspace.");
+        }
+
+        subdomainSlug = subdomainSlug.Trim().ToLowerInvariant();
+        if (subdomainSlug.Length is < 2 or > 63 || !SlugPattern().IsMatch(subdomainSlug))
+        {
+            return new(TenantProvisioningOutcome.Invalid, "Subdomain must be 2–63 lowercase letters, digits, or hyphens, and cannot start or end with a hyphen.");
+        }
+
+        if (ReservedSubdomains.Contains(subdomainSlug))
+        {
+            return new(TenantProvisioningOutcome.Conflict, $"Subdomain '{subdomainSlug}' is reserved.");
+        }
+
+        var maxTenants = identityOptions.Value.MaxTenantsPerUser;
+        var ownedCount = await authDb.Memberships.CountAsync(
+            m => m.UserId == owner.Id && m.Role == TenantRoles.Owner && m.Status == MembershipStatus.Active,
+            ct);
+        if (ownedCount >= maxTenants)
+        {
+            return new(TenantProvisioningOutcome.Forbidden, $"You can create at most {maxTenants} workspace(s).");
+        }
+
+        var baseDomain = identityOptions.Value.SelfSignUpBaseDomain.Trim().TrimStart('.').ToLowerInvariant();
+        var domain = $"{subdomainSlug}.{baseDomain}";
+        return await ProvisionAsync(name, domain, owner.Email, siloConnectionString: null, actorId: owner.Id, ct);
+    }
+
     [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")]
     private static partial Regex DomainPattern();
+
+    [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")]
+    private static partial Regex SlugPattern();
 }
