@@ -103,7 +103,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         cmd.Parameters.AddWithValue("email", email);
         cmd.Parameters.AddWithValue("role", role);
         cmd.Parameters.AddWithValue("status", status);
-        await cmd.ExecuteNonQueryAsync();
+        var affected = await cmd.ExecuteNonQueryAsync();
+        if (affected == 0)
+        {
+            throw new InvalidOperationException($"User '{email}' was not found in identity.users.");
+        }
     }
 
     public async Task<long> CountAsync(string connectionString, string sql)

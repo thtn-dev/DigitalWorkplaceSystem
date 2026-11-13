@@ -127,6 +127,17 @@ public class TenancyTests(PostgresFixture db)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    [Fact]
+    public async Task AddMemberAsync_throws_when_user_email_does_not_exist()
+    {
+        await using var host = db.CreateHost();
+        var (tenantId, _) = await db.CreateTenantAsync(host);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => db.AddMemberAsync(tenantId, $"missing-{Guid.NewGuid():N}@test.local"));
+        Assert.Contains("not found", ex.Message);
+    }
+
     private async Task<string> AliceTokenAsync(OidcTestClient browser, string domain) =>
         (await browser.GetTokensAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, await db.TenantIdAsync(domain), domain)).AccessToken!;
 
