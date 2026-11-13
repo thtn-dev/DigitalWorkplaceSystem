@@ -165,6 +165,37 @@ public partial class AccountSecurityTests(PostgresFixture db)
     }
 
     [Fact]
+    public async Task Registration_sends_confirmation_link_that_verifies_email_and_rejects_forged_token()
+    {
+        await using var host = db.CreateHost();
+        var email = IamTests.NewEmail("confirm");
+        var browser = new OidcTestClient(host);
+        await browser.RegisterAsync(email, Password);
+
+        Assert.Equal("false", await db.ScalarAsync($"SELECT email_confirmed::text FROM identity.users WHERE email = '{email}'"));
+        var link = db.Emails.LastLinkTo(email);
+        Assert.StartsWith("/account/confirm-email?", link, StringComparison.Ordinal);
+
+        // Forged token is rejected.
+        var forged = Regex.Replace(link, "token=[^&]+", "token=forged");
+        var forgedHtml = await browser.GetPageAsync(forged);
+        Assert.Contains("invalid or expired", forgedHtml);
+        Assert.Equal("false", await db.ScalarAsync($"SELECT email_confirmed::text FROM identity.users WHERE email = '{email}'"));
+
+        // Resend confirmation link from home page works and issues a valid link.
+        await browser.PostFormAsync("/?handler=ResendConfirmation", new(), tokenPage: "/");
+        link = db.Emails.LastLinkTo(email);
+
+        var confirmedHtml = await browser.GetPageAsync(link);
+        Assert.Contains("id=\"email-confirmed\"", confirmedHtml);
+        Assert.Equal("true", await db.ScalarAsync($"SELECT email_confirmed::text FROM identity.users WHERE email = '{email}'"));
+
+        var userId = await db.ScalarAsync($"SELECT id::text FROM identity.users WHERE email = '{email}'");
+        Assert.Equal(1, await db.CountAsync(db.CatalogConnectionString,
+            $"SELECT count(*) FROM identity.audit_events WHERE user_id = '{userId}' AND type = 'user.email_confirmed'"));
+    }
+
+    [Fact]
     public async Task Smtp_email_sender_delivers_password_reset_and_invitation_emails_with_usable_links()
     {
         await using var smtp = new LoopbackSmtpServer();
@@ -179,10 +210,13 @@ public partial class AccountSecurityTests(PostgresFixture db)
 
         var email = IamTests.NewEmail("smtp-reset");
         await new OidcTestClient(host).RegisterAsync(email, Password);
+        var confirmMessage = smtp.SingleMessageTo(email);
+        Assert.Equal("Confirm your email address", confirmMessage.Subject);
 
         var browser = new OidcTestClient(host);
         await browser.PostFormAsync("/account/forgot-password", new() { ["Email"] = email });
-        var resetMessage = smtp.SingleMessageTo(email);
+        Assert.Equal(2, smtp.MessagesTo(email).Count);
+        var resetMessage = smtp.LastMessageTo(email);
         var plainResetLink = LoopbackSmtpServer.FirstLinkIn(resetMessage);
         var htmlResetHref = HtmlHref().Match(resetMessage.HtmlBody);
         Assert.True(htmlResetHref.Success);

@@ -24,6 +24,8 @@ public sealed class TestEmailSender : IAccountEmailSender
 
     public Task SendSetPasswordAsync(string email, string link) => Keep(email, link);
 
+    public Task SendEmailConfirmationAsync(string email, string link) => Keep(email, link);
+
     /// <summary>Path and query of the last link sent to <paramref name="email"/> (pages live on the authorization server host).</summary>
     public string LastLinkTo(string email) =>
         _lastLink.TryGetValue(email, out var link) ? new Uri(link).PathAndQuery : throw new InvalidOperationException($"No email sent to {email}.");
@@ -63,11 +65,21 @@ public sealed partial class LoopbackSmtpServer : IAsyncDisposable
 
     public int Port { get; }
 
+    public IReadOnlyList<ReceivedEmail> MessagesTo(string recipient) =>
+        [.. _messages.Where(m => m.Recipients.Contains(recipient, StringComparer.OrdinalIgnoreCase))];
+
     public ReceivedEmail SingleMessageTo(string recipient)
     {
-        var matches = _messages.Where(m => m.Recipients.Contains(recipient, StringComparer.OrdinalIgnoreCase)).ToList();
+        var matches = MessagesTo(recipient);
         Assert.True(matches.Count == 1, $"Expected 1 email to {recipient}, found {matches.Count}.");
         return matches[0];
+    }
+
+    public ReceivedEmail LastMessageTo(string recipient)
+    {
+        var matches = MessagesTo(recipient);
+        Assert.NotEmpty(matches);
+        return matches[^1];
     }
 
     public static string FirstLinkIn(ReceivedEmail email)

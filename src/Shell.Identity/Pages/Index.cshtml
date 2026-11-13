@@ -1,17 +1,31 @@
 @page "/"
+@model Shell.Identity.Pages.IndexModel
 @{
     ViewData["Title"] = "Account";
 }
-@if (User.Identity?.IsAuthenticated == true)
+<h1>Account</h1>
+@if (Model.StatusMessage is not null)
 {
-    <p>Signed in as <strong>@User.Identity.Name</strong>.</p>
-    <ul>
-        <li><a href="/account/mfa">Two-factor authentication</a></li>
-        <li><a href="/account/logins">Linked logins</a></li>
-    </ul>
-    <form method="post" asp-page="/Account/Logout"><button type="submit">Sign out</button></form>
+    <div class="ok">@Model.StatusMessage</div>
+}
+@if (Model.Email is not null)
+{
+    <p class="muted">Signed in as <strong>@Model.Email</strong></p>
+    @if (!Model.EmailConfirmed)
+    {
+        <p class="muted">Email not confirmed yet.</p>
+        <form method="post" asp-page-handler="ResendConfirmation">
+            <button type="submit" class="secondary">Resend confirmation email</button>
+        </form>
+    }
+    <p class="links">
+        <a href="/tenants/new">Create a workspace</a> ·
+        <a href="/account/mfa">Two-factor authentication @(Model.TwoFactorEnabled ? "(on)" : "(off)")</a> ·
+        <a href="/account/logins">Sign-in methods</a>
+    </p>
+    <form method="post" asp-page="/Account/Logout"><button type="submit" class="secondary">Sign out</button></form>
 }
 else
 {
-    <p><a href="/account/login">Sign in</a> or <a href="/account/register">create an account</a>.</p>
+    <p class="links"><a href="/account/login">Sign in</a> · <a href="/account/register">Create account</a></p>
 }

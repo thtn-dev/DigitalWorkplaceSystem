@@ -17,6 +17,8 @@ public interface IAccountEmailSender
 
     /// <summary>Password reset, or first password of an imported account.</summary>
     Task SendSetPasswordAsync(string email, string link);
+
+    Task SendEmailConfirmationAsync(string email, string link);
 }
 
 internal sealed class LoggingAccountEmailSender(ILogger<LoggingAccountEmailSender> logger) : IAccountEmailSender
@@ -30,6 +32,12 @@ internal sealed class LoggingAccountEmailSender(ILogger<LoggingAccountEmailSende
     public Task SendSetPasswordAsync(string email, string link)
     {
         logger.LogWarning("No email provider configured. Set-password link for {Email}: {Link}", email, link);
+        return Task.CompletedTask;
+    }
+
+    public Task SendEmailConfirmationAsync(string email, string link)
+    {
+        logger.LogWarning("No email provider configured. Confirmation link for {Email}: {Link}", email, link);
         return Task.CompletedTask;
     }
 }
@@ -53,6 +61,16 @@ internal sealed class SmtpAccountEmailSender(IOptions<ShellIdentityOptions> opti
         var html =
             "<p>Use the link below to set or reset your password:</p>" +
             $"<p><a href=\"{WebUtility.HtmlEncode(link)}\">Set password</a></p>";
+        return SendAsync(email, subject, text, html);
+    }
+
+    public Task SendEmailConfirmationAsync(string email, string link)
+    {
+        const string subject = "Confirm your email address";
+        var text = $"Confirm your email address by opening this link:\n\n{link}";
+        var html =
+            "<p>Confirm your email address by opening this link:</p>" +
+            $"<p><a href=\"{WebUtility.HtmlEncode(link)}\">Confirm email</a></p>";
         return SendAsync(email, subject, text, html);
     }
 
@@ -96,6 +114,9 @@ public sealed class AccountLinks(IOptions<ShellIdentityOptions> options)
 
     public string SetPassword(Guid userId, string token) =>
         Build($"account/set-password?userId={userId}&token={Uri.EscapeDataString(token)}");
+
+    public string ConfirmEmail(Guid userId, string token) =>
+        Build($"account/confirm-email?userId={userId}&token={Uri.EscapeDataString(token)}");
 
     private string Build(string relative) => new Uri(options.Value.Issuer!, relative).ToString();
 }

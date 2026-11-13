@@ -1,0 +1,20 @@
+@page "/account/confirm-email"
+@model Shell.Identity.Pages.Account.ConfirmEmailModel
+@{
+    ViewData["Title"] = "Confirm email";
+}
+<h1>Confirm email</h1>
+
+@if (Model.Error is not null)
+{
+    <div class="error" role="alert">@Model.Error</div>
+    <p class="links"><a href="/">Back to account</a></p>
+}
+else if (Model.Confirmed)
+{
+    <div id="email-confirmed" class="ok">Your email address has been confirmed.</div>
+    <p class="links">
+        <a href="/tenants/new">Create a workspace</a> ·
+        <a href="/">Account</a>
+    </p>
+}
