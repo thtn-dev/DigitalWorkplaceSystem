@@ -40,6 +40,8 @@ public sealed class ShellIdentityOptions
 
     public KeyOptions Keys { get; set; } = new();
 
+    public EmailOptions Email { get; set; } = new();
+
     /// <summary>Host name (lowercase) of <see cref="Issuer"/>.</summary>
     public string AuthHost => Issuer!.Host.ToLowerInvariant();
 
@@ -77,5 +79,28 @@ public sealed class ShellIdentityOptions
 
         /// <summary>Creates self-signed certificates when none exist. Development and demo only: production mounts real ones.</summary>
         public bool AutoGenerate { get; set; }
+    }
+
+    /// <summary>SMTP settings for account emails (<c>Identity:Email</c>).</summary>
+    public sealed class EmailOptions
+    {
+        /// <summary>SMTP server host. Empty/null in local or test setups falls back to logging links to the console.</summary>
+        public string? Host { get; set; }
+
+        [Range(1, 65535)]
+        public int Port { get; set; } = 587;
+
+        public string FromAddress { get; set; } = "noreply@localhost";
+
+        public string FromName { get; set; } = "Digital Workspace";
+
+        public string? Username { get; set; }
+
+        /// <summary>Secret: environment variable or secret store, never appsettings.</summary>
+        public string? Password { get; set; }
+
+        public bool UseSsl { get; set; }
+
+        public bool IsConfigured => !string.IsNullOrWhiteSpace(Host);
     }
 }

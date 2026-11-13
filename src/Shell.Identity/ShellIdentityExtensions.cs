@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Server;
@@ -55,6 +56,8 @@ public static class ShellIdentityExtensions
             .Validate(o => o.Issuer is { IsAbsoluteUri: true }, "Identity:Issuer must be an absolute URL.")
             .Validate(o => o.Clients.RedirectUris.Concat(o.Clients.PostLogoutRedirectUris).All(uri => uri.Contains("{domain}", StringComparison.Ordinal)),
                 "Identity:Clients redirect URIs must contain {domain}.")
+            .Validate(o => !o.Email.IsConfigured || (o.Email.Port is >= 1 and <= 65535 && !string.IsNullOrWhiteSpace(o.Email.FromAddress) && o.Email.FromAddress.Contains('@', StringComparison.Ordinal)),
+                "Identity:Email requires a valid FromAddress and Port (1..65535) when Identity:Email:Host is set.")
             .ValidateOnStart();
 
         // The authorization server host belongs to no tenant.
@@ -210,7 +213,13 @@ public static class ShellIdentityExtensions
         services.AddScoped<UserAccountService>();
         services.AddScoped<AuditLog>();
         services.AddSingleton<AccountLinks>();
-        services.TryAddSingleton<IAccountEmailSender, LoggingAccountEmailSender>();
+        services.TryAddSingleton<IAccountEmailSender>(sp =>
+        {
+            var identityOptions = sp.GetRequiredService<IOptions<ShellIdentityOptions>>();
+            return identityOptions.Value.Email.IsConfigured
+                ? new SmtpAccountEmailSender(identityOptions, sp.GetRequiredService<ILogger<SmtpAccountEmailSender>>())
+                : new LoggingAccountEmailSender(sp.GetRequiredService<ILogger<LoggingAccountEmailSender>>());
+        });
         services.AddScoped<TenantClientSynchronizer>();
         services.AddScoped<DemoUserSeeder>();
         services.AddTransient<IMigrationStep, IdentityMigrationStep>();

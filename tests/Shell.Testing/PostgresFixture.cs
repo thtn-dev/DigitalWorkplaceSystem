@@ -185,7 +185,11 @@ public sealed class ShellHostFactory(
 
         builder.ConfigureTestServices(services =>
         {
-            services.AddSingleton<IAccountEmailSender>(emails);
+            if (settings is null || !settings.TryGetValue("Identity:Email:Host", out var smtpHost) || string.IsNullOrWhiteSpace(smtpHost))
+            {
+                services.AddSingleton<IAccountEmailSender>(emails);
+            }
+
             services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, FakeSocialHandler>(FakeSocialHandler.SchemeName, "Fake", _ => { });
         });
     }

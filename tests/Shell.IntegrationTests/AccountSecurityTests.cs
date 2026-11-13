@@ -1,7 +1,16 @@
+using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Shell.Core;
+using Shell.Core.Modules;
 using Shell.Core.Tenancy;
 using Shell.Identity;
+using Shell.Identity.Data;
+using Shell.Identity.Endpoints;
 
 namespace Shell.IntegrationTests;
 
@@ -153,6 +162,95 @@ public partial class AccountSecurityTests(PostgresFixture db)
         Assert.Equal(HttpStatusCode.Redirect, (await browser.PostFormAsync(link, new() { ["Password"] = "New-Passw0rd-2" })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await new OidcTestClient(host).SubmitLoginAsync(email, Password)).StatusCode);
         Assert.Equal(HttpStatusCode.Redirect, (await new OidcTestClient(host).SubmitLoginAsync(email, "New-Passw0rd-2")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Smtp_email_sender_delivers_password_reset_and_invitation_emails_with_usable_links()
+    {
+        await using var smtp = new LoopbackSmtpServer();
+        await using var host = db.CreateHost(new Dictionary<string, string?>
+        {
+            ["Identity:Email:Host"] = "127.0.0.1",
+            ["Identity:Email:Port"] = smtp.Port.ToString(CultureInfo.InvariantCulture),
+            ["Identity:Email:FromAddress"] = "noreply@auth.localhost",
+            ["Identity:Email:FromName"] = "Digital Workspace",
+            ["Identity:Email:UseSsl"] = "false",
+        });
+
+        var email = IamTests.NewEmail("smtp-reset");
+        await new OidcTestClient(host).RegisterAsync(email, Password);
+
+        var browser = new OidcTestClient(host);
+        await browser.PostFormAsync("/account/forgot-password", new() { ["Email"] = email });
+        var resetMessage = smtp.SingleMessageTo(email);
+        var resetLink = new Uri(LoopbackSmtpServer.FirstLinkIn(resetMessage)).PathAndQuery();
+        Assert.Equal(HttpStatusCode.Redirect, (await browser.PostFormAsync(resetLink, new() { ["Password"] = "New-Passw0rd-2" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, (await new OidcTestClient(host).SubmitLoginAsync(email, "New-Passw0rd-2")).StatusCode);
+
+        var (tenantId, domain) = await db.CreateTenantAsync(host);
+        await db.ExecuteAsync($"UPDATE catalog.tenants SET name = 'Acme <script>alert(1)</script>\r\nBcc: evil@example.com' WHERE id = '{tenantId}'");
+        await db.AddMemberAsync(tenantId, DemoUserSeeder.Alice, role: "owner");
+        var ownerToken = (await new OidcTestClient(host).GetTokensAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, tenantId, domain)).AccessToken;
+
+        var invitedEmail = IamTests.NewEmail("smtp-invite");
+        var inviteResponse = await OidcTestClient.CallApiAsync(host, domain, HttpMethod.Post, "/iam/invitations", ownerToken, new InviteRequest(invitedEmail, "member"));
+        Assert.Equal(HttpStatusCode.Created, inviteResponse.StatusCode);
+
+        var inviteMessage = smtp.SingleMessageTo(invitedEmail);
+        Assert.DoesNotContain('\r', inviteMessage.Subject);
+        Assert.DoesNotContain('\n', inviteMessage.Subject);
+        Assert.Contains("&lt;script&gt;alert(1)&lt;/script&gt;", inviteMessage.HtmlBody);
+        Assert.DoesNotContain("<script>", inviteMessage.HtmlBody, StringComparison.OrdinalIgnoreCase);
+
+        var inviteLink = new Uri(LoopbackSmtpServer.FirstLinkIn(inviteMessage)).PathAndQuery();
+        var invitee = new OidcTestClient(host);
+        await invitee.RegisterAsync(invitedEmail, Password);
+        var acceptedHtml = await (await invitee.PostFormAsync(inviteLink, new(), tokenPage: "/account/login")).Content.ReadAsStringAsync(Ct);
+        Assert.Contains("id=\"accepted\"", acceptedHtml);
+    }
+
+    [Fact]
+    public void Invalid_smtp_options_fail_fast_at_startup_when_host_is_configured()
+    {
+        // Program.cs catches OptionsValidationException and returns exit code 1, so the TestHost does not start.
+        using var invalidAddressHost = db.CreateHost(new Dictionary<string, string?>
+        {
+            ["Identity:Email:Host"] = "smtp.example.com",
+            ["Identity:Email:Port"] = "587",
+            ["Identity:Email:FromAddress"] = "not-an-email",
+        });
+        Assert.Throws<ObjectDisposedException>(() => _ = invalidAddressHost.Services);
+
+        using var invalidPortHost = db.CreateHost(new Dictionary<string, string?>
+        {
+            ["Identity:Email:Host"] = "smtp.example.com",
+            ["Identity:Email:Port"] = "70000",
+            ["Identity:Email:FromAddress"] = "noreply@example.com",
+        });
+        Assert.Throws<ObjectDisposedException>(() => _ = invalidPortHost.Services);
+
+        foreach (var badPair in new[] { ("Port", "70000"), ("FromAddress", "not-an-email") })
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Catalog"] = db.CatalogConnectionString,
+                    ["ConnectionStrings:DefaultShared"] = db.SharedConnectionString,
+                    ["Identity:Issuer"] = $"http://{ShellHostFactory.AuthHost}/",
+                    ["Identity:Email:Host"] = "smtp.example.com",
+                    ["Identity:Email:Port"] = badPair.Item1 == "Port" ? badPair.Item2 : "587",
+                    ["Identity:Email:FromAddress"] = badPair.Item1 == "FromAddress" ? badPair.Item2 : "noreply@example.com",
+                })
+                .Build();
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(config);
+            services.AddShell(config, ModuleCatalog.Build([]));
+            services.AddShellIdentity(config);
+            using var provider = services.BuildServiceProvider();
+
+            var ex = Assert.Throws<OptionsValidationException>(() => _ = provider.GetRequiredService<IOptions<ShellIdentityOptions>>().Value);
+            Assert.Contains("Identity:Email", ex.Message);
+        }
     }
 
     /// <summary>Clicks "Continue with Fake" and follows the provider round trip; returns the final page.</summary>
