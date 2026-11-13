@@ -10,7 +10,7 @@ Những điểm mở rộng còn lại trên nền `Shell.Identity`:
 
 - **Phân quyền chi tiết theo module**: mở rộng `IModule` để khai báo permission (ví dụ `products.write`), ánh xạ qua role và kiểm tra bằng `RequirePermission(...)`.
 - **Client máy-máy / tích hợp ngoài**: hỗ trợ `client_credentials` gắn tenant cho hệ thống đối tác với scope giới hạn.
-- **Gửi email thật**: thay `LoggingAccountEmailSender` bằng implementation SMTP / SendGrid / SES qua `services.AddSingleton<IAccountEmailSender, ...>()`.
+- **Gửi email thật**: `SmtpAccountEmailSender` đã được tích hợp sẵn và tự kích hoạt khi cấu hình `Identity:Email:Host` (local Docker Compose dùng sẵn Mailpit); nếu muốn dùng API của nhà cung cấp (SendGrid, SES) hoặc outbox, đăng ký implementation thay thế qua `services.AddSingleton<IAccountEmailSender, ...>()`.
 - Tắt `Tenancy:AllowHostHeaderOverride` ở production. Nếu cần chọn tenant qua header (mobile app, API key), chỉ chấp nhận khi header khớp claim.
 
 ## 2. Quản lý tenant

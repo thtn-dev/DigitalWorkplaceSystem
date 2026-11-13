@@ -20,6 +20,11 @@ x-host: &host
     Identity__Clients__PostLogoutRedirectUris__0: http://{domain}:8080/
     Identity__Keys__Path: /keys
     Identity__Keys__AutoGenerate: "true"
+    Identity__Email__Host: mailpit
+    Identity__Email__Port: "1025"
+    Identity__Email__FromAddress: noreply@auth.localhost
+    Identity__Email__FromName: Digital Workspace
+    Identity__Email__UseSsl: "false"
   volumes:
     - keys:/keys
   # Longer than ShutdownTimeoutSeconds so in-flight requests can finish before SIGKILL.
@@ -41,6 +46,12 @@ services:
       interval: 3s
       timeout: 3s
       retries: 20
+
+  mailpit:
+    image: axllent/mailpit:v1.24
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI (http://localhost:8025)
 
   migrate:
     <<: *host

@@ -22,7 +22,7 @@ Bộ khung để xây hệ thống nghiệp vụ **multi-tenant** dạng **modul
 docker compose up --build -d
 ```
 
-Thứ tự: `postgres` → `migrate` (tạo/migrate DB Catalog + schema `identity`, seed 2 tenant demo, 2 tài khoản demo `alice@demo.local` / `bob@demo.local` và OAuth client khi bật `SeedDemoTenants`, migrate DB chung và DB riêng của tenant B, rồi thoát) → `host1`, `host2` → `nginx` tại http://localhost:8080.
+Thứ tự: `postgres` → `migrate` (tạo/migrate DB Catalog + schema `identity`, seed 2 tenant demo, 2 tài khoản demo `alice@demo.local` / `bob@demo.local` và OAuth client khi bật `SeedDemoTenants`, migrate DB chung và DB riêng của tenant B, rồi thoát) → `host1`, `host2` → `nginx` tại http://localhost:8080, kèm `mailpit` (SMTP `1025`, giao diện web xem mail tại http://localhost:8025).
 
 Hai tenant demo:
 
@@ -88,6 +88,7 @@ src/
     Products/                Module mẫu: Product (IMustHaveTenant), ProductsDbContext, /api/products
     Products.Contracts/      DTO công khai cho module khác
 tests/
+  Shell.Testing/           Test kit dùng lại (`PostgresFixture`, `ShellHostFactory`, `OidcTestClient`, `LoopbackSmtpServer`, helper tạo tenant/member tạm)
   Shell.UnitTests/         ModuleCatalog + architecture test (NetArchTest, auto-scan Modules.*.csproj)
   Shell.IntegrationTests/  Testcontainers: quy tắc TenantDbContext, migrate, Pool vs Silo, auth, IAM, bảo mật
 deploy/nginx.conf          Load balancer cho docker compose
@@ -128,6 +129,11 @@ Request cần tenant: domain không có trong Catalog → **404**, tenant bị k
 | `Identity:Clients:RedirectUris` | `["https://{domain}/signin-callback"]` | Mẫu redirect URI cho OAuth client của từng tenant |
 | `Identity:Keys:Path` | `"keys"` | Thư mục chứa cert ký/mã hoá token (`signing-*.pfx`, `encryption-*.pfx`) |
 | `Identity:Keys:AutoGenerate` | `false` | Tự sinh cert self-signed khi trống (chỉ dùng cho dev/demo) |
+| `Identity:Email:Host` | *(trống)* | Máy chủ SMTP gửi mail xác thực/lời mời (để trống = chỉ ghi link ra log; khi đặt phải có `FromAddress` và `Port` hợp lệ) |
+| `Identity:Email:Port` | `587` | Cổng SMTP (`1..65535`; Mailpit dev dùng `1025`) |
+| `Identity:Email:FromAddress` / `FromName` | `noreply@localhost` / `Digital Workspace` | Địa chỉ và tên hiển thị người gửi email |
+| `Identity:Email:Username` / `Password` | *(trống)* | Thông tin đăng nhập SMTP (nếu máy chủ SMTP yêu cầu xác thực) |
+| `Identity:Email:UseSsl` | `true` | Bật TLS/SSL khi kết nối SMTP (`false` cho Mailpit dev nội bộ) |
 | `Identity:Google:*` / `Microsoft:*` | *(trống)* | `ClientId` / `ClientSecret` cho social login (chỉ bật khi cấu hình đủ) |
 | `Shell:ShutdownTimeoutSeconds` | 30 | Thời gian chờ request đang chạy khi nhận SIGTERM |
 | `Shell:TrustForwardedHeaders` | `false` | Tin tưởng `X-Forwarded-For` / `X-Forwarded-Proto` từ reverse proxy |

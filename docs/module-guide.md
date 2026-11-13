@@ -164,6 +164,8 @@ curl localhost:5080/api/orders -H "X-Tenant-Host: tenant-a.localhost"
 dotnet test --solution DigitalWorkspace.slnx
 ```
 
+> Khi viết project integration test riêng cho module, chỉ cần tham chiếu `tests/Shell.Testing/Shell.Testing.csproj` để dùng lại `PostgresFixture` (gồm `CreateTenantAsync`, `AddMemberAsync`), `ShellHostFactory` và `OidcTestClient`.
+
 ## Checklist
 
 - [ ] Project tên `Modules.<Tên>` và `Modules.<Tên>.Contracts`

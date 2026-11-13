@@ -131,7 +131,10 @@ Cái còn thiếu nằm ở ba nhóm:
 Gom theo đợt, mỗi đợt là một kế hoạch riêng:
 
 1. **Đợt 0 – Dọn nền (nhanh, rẻ):** `E1` CI, `E2` docs, `I2` security headers, `E4` (phần `ArchitectureTests` tự quét `Modules.*.dll`), `E3` `.editorconfig` & analyzer.
-2. **Đợt 1 – Vận hành & Onboarding tenant:** `B13` tách `Shell.Testing` → `I1` email thật (SMTP + Mailpit dev) → `T1` self sign-up (tạo Pool tenant dùng thử) → `T2` platform admin → `T4` vô hiệu cache tức thời.
+2. **Đợt 1 – Vận hành & Onboarding tenant** (chia thành 3 kế hoạch nhỏ làm lần lượt):
+   - **Đợt 1A – Hạ tầng Test & Email:** `B13` tách project `Shell.Testing` → `I1` gửi email thật (SMTP + Mailpit dev).
+   - **Đợt 1B – Provisioning & Self Sign-up Tenant:** `T1` tách migrate/sync đơn tenant, CLI `create-tenant`, xác minh email tài khoản và luồng khách tự tạo Pool tenant dùng thử tại `/tenants/new`.
+   - **Đợt 1C – Quản trị nền tảng & Đồng bộ Cache:** `T2` Platform Admin (Minimal API `/admin/*` trên auth host + CLI `grant-admin`/`revoke-admin`) → `T4` vô hiệu cache tenant/membership tức thời qua Postgres `LISTEN/NOTIFY`.
 3. **Đợt 2 – Building blocks cho module** (làm trước khi viết module thật thứ hai): `B1`, `B2`, `B3`, `B4`, `B5`, `B10`, `E4` (template tạo module); sau đó `B7` phân quyền chi tiết (kiểm tra theo permission, ánh xạ từ role cố định và mở rộng được sang custom role).
 4. **Đợt 3 – Bất đồng bộ & vận hành dài hạn:** `B9` background job → `I3` prune token, `O4` giám sát DB Silo; `B8` event + outbox.
 5. **Đợt 4 – Trước production:** `D1` + `T3` quản lý secret & bảo vệ connection string Silo, `A1` CORS động theo tenant + `A2` rate limit + `E5` SPA mẫu verify E2E, `I4` trang tài khoản tự phục vụ, `O1` observability, `D3` hạ tầng triển khai (`docker-compose.prod.yml` + TLS), `D2` backup/restore.
@@ -139,7 +142,7 @@ Gom theo đợt, mỗi đợt là một kế hoạch riêng:
 
 ## 10. Quyết định đã chốt (2026-11-13)
 
-- **Tạo tenant (`T1`, `T2`, `T6`):** Khách **tự đăng ký (self sign-up)** công khai, mặc định tạo **Pool tenant dùng thử** rồi mới nâng cấp sau. `T1` cần luồng đăng ký + xác minh email + chống spam + cấp subdomain; `T2` (Platform Admin) để đội vận hành kiểm soát/khoá/hỗ trợ; `T6` (gói/feature flag) và `T5` (chuyển Pool → Silo) giữ ở `P2`.
+- **Tạo tenant & Quản trị nền tảng (`T1`, `T2`, `T6`):** Khách **tự đăng ký (self sign-up)** công khai theo luồng **xác minh email trước rồi mới tạo tenant** (đăng ký/đăng nhập → xác nhận link email → tạo Pool tenant dùng thử tại `/tenants/new` để chống rác DB và OAuth client), nâng cấp gói sau. `T2` (Platform Admin) triển khai dưới dạng **Minimal API JSON (`/admin/*` trên auth host, đồng nhất với `/iam/*`)** kết hợp lệnh CLI `grant-admin`/`revoke-admin` để đội vận hành kiểm soát/khoá/hỗ trợ; `T6` (gói/feature flag) và `T5` (chuyển Pool → Silo) giữ ở `P2`.
 - **Phân quyền (`B7`):** Endpoint của module kiểm tra theo **permission** (`RequirePermission(...)`); tầng giải quyết quyền ban đầu ánh xạ từ **bộ role cố định** nhưng thiết kế sẵn abstraction để mở rộng sang custom role per-tenant sau này mà không sửa code module.
 - **Frontend & Client (`A1`, `I5`, `E5`):** SPA chạy **tách domain riêng** → `A1` (CORS động theo domain của tenant đang phân giải) là bắt buộc; API giữ xác thực Bearer token qua OpenIddict để về lâu dài mở rộng sang mobile app và `I5` (client máy-máy) mà không phải đổi kiến trúc auth.
 - **Hạ tầng triển khai (`D1`, `T3`, `D3`):** Giai đoạn production đầu tiên triển khai trên **VM + Docker Compose**, mở rộng lên Cloud/K8s sau → `D3` tập trung vào `docker-compose.prod.yml`, TLS (wildcard + custom domain), migrate job và resource limits; `D1`/`T3` dùng cơ chế secret/mã hoá tại host qua abstraction để dễ thay bằng Cloud secret store sau.
