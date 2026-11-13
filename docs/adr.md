@@ -52,7 +52,7 @@
 - (+) An toàn mặc định: không có tenant thì không đọc được gì, không ghi được gì.
 - (−) Thay đổi trong Catalog có độ trễ tối đa bằng TTL cache trên mỗi instance.
 - (−) Chuyển dữ liệu một tenant từ Pool sang Silo cần script riêng.
-- (−) Chưa có xác thực: domain quyết định tenant. Phải thêm auth ràng buộc user ↔ tenant trước production.
+- (+) Xác thực và ràng buộc user ↔ tenant được xử lý ở tầng `Shell.Identity` (xem ADR-006).
 
 ---
 
@@ -86,3 +86,19 @@ Seed nằm trong lệnh này vì DB riêng của tenant Silo vừa seed phải �
 - (+) Migration của các module độc lập; ranh giới module rõ cả ở tầng DB.
 - (+) Tách một module ra service riêng sau này chỉ cần tách schema.
 - (−) Không có transaction xuyên module "chính thống"; cần nhất quán thì dùng outbox/event.
+
+---
+
+## ADR-006: Identity tập trung ở Catalog DB, tách Auth Host và gắn Token vào Tenant
+
+**Bối cảnh.** Một tài khoản cá nhân có thể tham gia nhiều tenant (giống Slack/GitHub), nhưng access token cấp ra phải bị khoá chặt vào đúng một tenant và phải thu hồi quyền truy cập nhanh khi người dùng bị xoá khỏi tenant hoặc bị khoá tài khoản.
+
+**Quyết định.**
+- Đặt `AuthDbContext` (schema `identity`: `users`, `tenant_memberships`, `invitations`, `audit_events`, bảng OpenIddict, Data Protection keys) trong **Catalog DB** thay vì nhân bản sang Shared/Silo DB.
+- Tách **auth host** riêng (`Identity:Issuer`): chỉ auth host phục vụ Razor Pages (`/account/*`) và endpoint OIDC (`/connect/*`), dùng host-only cookie (`__Host-shell.session` khi `RequireHttps = true`) để cookie phiên đăng nhập không bao giờ gửi sang subdomain của tenant.
+- Mỗi tenant có OAuth 2.1 public client (Authorization Code + PKCE). Access token mang claim `tenant_id`; trên mọi tenant host, `TenantAccessMiddleware` đối chiếu claim này với `ITenantContext.Current.Id` và kiểm tra trạng thái membership (cache ngắn `MembershipCacheSeconds`, mặc định 30 giây).
+
+**Hệ quả.**
+- (+) Một tài khoản dùng chung nhiều tenant; cookie đăng nhập cô lập hoàn toàn trên auth host.
+- (+) Token của tenant A gọi sang domain của tenant B bị từ chối (403); thu hồi membership có hiệu lực tối đa sau `MembershipCacheSeconds`.
+- (−) Catalog DB chịu thêm tải đọc khi kiểm tra membership lúc hết TTL cache (30 giây) và trong các luồng đăng nhập/làm mới token.

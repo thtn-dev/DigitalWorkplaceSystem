@@ -2,6 +2,7 @@
   <Folder Name="/docs/">
     <File Path="docs/adr.md" />
     <File Path="docs/architecture.md" />
+    <File Path="docs/core-gap-analysis.md" />
     <File Path="docs/extension-points.md" />
     <File Path="docs/module-guide.md" />
     <File Path="docs/README.md" />

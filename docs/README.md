@@ -7,7 +7,7 @@ Bộ khung để xây hệ thống nghiệp vụ **multi-tenant** dạng **modul
 - Tenant xác định theo **domain** của request (`tenant1.app.com`, `shop.khachhang.com`), có cache.
 - Scale ngang: instance stateless, migration chạy bằng lệnh riêng, health check, log JSON, Docker.
 
-Đọc tiếp: [architecture.md](architecture.md) · [module-guide.md](module-guide.md) · [adr.md](adr.md) · [extension-points.md](extension-points.md)
+Đọc tiếp: [architecture.md](architecture.md) · [module-guide.md](module-guide.md) · [adr.md](adr.md) · [extension-points.md](extension-points.md) · [core-gap-analysis.md](core-gap-analysis.md) (backlog phần core còn thiếu)
 
 ## Yêu cầu
 
@@ -22,7 +22,7 @@ Bộ khung để xây hệ thống nghiệp vụ **multi-tenant** dạng **modul
 docker compose up --build -d
 ```
 
-Thứ tự: `postgres` → `migrate` (tạo/migrate DB Catalog, seed 2 tenant demo, migrate DB chung và DB riêng của tenant B, rồi thoát) → `host1`, `host2` → `nginx` tại http://localhost:8080.
+Thứ tự: `postgres` → `migrate` (tạo/migrate DB Catalog + schema `identity`, seed 2 tenant demo, 2 tài khoản demo `alice@demo.local` / `bob@demo.local` và OAuth client khi bật `SeedDemoTenants`, migrate DB chung và DB riêng của tenant B, rồi thoát) → `host1`, `host2` → `nginx` tại http://localhost:8080.
 
 Hai tenant demo:
 
@@ -65,14 +65,14 @@ Môi trường Development dùng DB riêng (`shell_dev_catalog`, `shell_dev_shar
 ### Test
 
 ```bash
-dotnet test --solution Shell.slnx              # unit + architecture + integration (cần Docker)
+dotnet test --solution DigitalWorkspace.slnx     # unit + architecture + integration (cần Docker)
 ```
 
 ## Cấu trúc thư mục
 
 ```
 src/
-  Host/                    Program.cs (pipeline, lệnh migrate, Swagger), appsettings
+  Host/                    Program.cs (pipeline, SecurityHeadersExtensions, lệnh migrate & identity CLI, Swagger), appsettings
   Shell.Abstractions/      Thứ duy nhất module tham chiếu từ shell:
     IModule.cs               hợp đồng module
     ModuleDbContextExtensions.cs  AddModuleDbContext (chọn DB theo tenant)
@@ -81,24 +81,29 @@ src/
     Modules/                 ModuleLoader, ModuleCatalog (thứ tự dependency, fail fast)
     Tenancy/                 CatalogDbContext, TenantStore (cache), TenantResolutionMiddleware, DemoTenantSeeder
     Data/                    MigrationRunner (lệnh migrate), DatabaseHealthCheck
+  Shell.Identity/          Authorization server (OpenIddict + Identity trên auth host),
+                           Razor Pages (/account/*), Bearer validation + TenantAccessMiddleware,
+                           IAM (/iam/*), audit log, Data Protection keys, CLI disable-user/enable-user
   Modules/
-    Products/                Module mẫu: Product (IMustHaveTenant), ProductsDbContext, GET/POST /api/products
+    Products/                Module mẫu: Product (IMustHaveTenant), ProductsDbContext, /api/products
     Products.Contracts/      DTO công khai cho module khác
 tests/
-  Shell.UnitTests/         ModuleCatalog + architecture test (NetArchTest)
-  Shell.IntegrationTests/  Testcontainers: quy tắc TenantDbContext, migrate, Pool vs Silo qua HTTP
+  Shell.UnitTests/         ModuleCatalog + architecture test (NetArchTest, auto-scan Modules.*.csproj)
+  Shell.IntegrationTests/  Testcontainers: quy tắc TenantDbContext, migrate, Pool vs Silo, auth, IAM, bảo mật
 deploy/nginx.conf          Load balancer cho docker compose
-Dockerfile, docker-compose.yml, Directory.Packages.props, dotnet-tools.json
+Dockerfile, docker-compose.yml, Directory.Build.props, Directory.Packages.props, .editorconfig, dotnet-tools.json
 ```
 
 ## Endpoint
 
-| Endpoint | Cần tenant | Mô tả |
+| Endpoint | Host / Tenant | Mô tả |
 |---|---|---|
-| `GET /health/live` | Không | Process còn sống |
-| `GET /health/ready` | Không | DB Catalog và DB chung trả lời, lỗi → 503 |
-| `/swagger` | Không | Chỉ ở Development |
-| `/api/{moduleId}/...` | **Có** | Endpoint nghiệp vụ, ví dụ `GET/POST /api/products` |
+| `GET /health/live` | Mọi host | Process còn sống |
+| `GET /health/ready` | Mọi host | DB Catalog và DB chung trả lời, lỗi → 503 |
+| `/swagger` | Mọi host (chỉ Development) | Swagger UI |
+| `/connect/*`, `/account/*` | **Chỉ Auth host** (`Identity:Issuer`) | OIDC Authorization Code + PKCE, đăng nhập, MFA, lời mời, quên mật khẩu |
+| `/iam/members`, `/iam/invitations`, `/iam/audit` | **Tenant host** (policy `tenant-admin`) | Quản lý thành viên, lời mời, audit log đăng nhập của tenant |
+| `/api/{moduleId}/...` | **Tenant host** (cần token + membership) | Endpoint nghiệp vụ, ví dụ `/api/products` |
 
 Request cần tenant: domain không có trong Catalog → **404**, tenant bị khoá (`is_active = false`) → **403**.
 
@@ -108,18 +113,29 @@ Request cần tenant: domain không có trong Catalog → **404**, tenant bị k
 
 | Khoá | Mặc định | Ý nghĩa |
 |---|---|---|
-| `ConnectionStrings:Catalog` | *(bắt buộc)* | DB master: danh sách tenant, domain, connection string Silo |
+| `ConnectionStrings:Catalog` | *(bắt buộc)* | DB master: tenant, domain, connection string Silo, schema `identity` |
 | `ConnectionStrings:DefaultShared` | *(bắt buộc)* | DB chung của mọi tenant Pool (mỗi module một schema) |
 | `Tenancy:AllowHostHeaderOverride` | `false` | Cho phép header `X-Tenant-Host` thay Host thật. **Chỉ bật khi dev/demo** |
 | `Tenancy:CacheMinutes` | 10 | Cache tenant đã tìm thấy (mỗi instance) |
 | `Tenancy:NotFoundCacheSeconds` | 60 | Cache domain không tồn tại (chống spam DB) |
-| `Tenancy:SeedDemoTenants` | `false` | Lệnh `migrate` tạo 2 tenant demo nếu Catalog trống |
+| `Tenancy:SeedDemoTenants` | `false` | Lệnh `migrate` tạo 2 tenant demo + tài khoản demo + OAuth client nếu trống |
+| `Identity:Issuer` | *(bắt buộc)* | URL công khai của authorization server (vd: `https://auth.app.com/`) |
+| `Identity:RequireHttps` | `true` | Đặt `false` chỉ cho local/demo HTTP; khi `true` bật `__Host-` cookie và HSTS |
+| `Identity:AccessTokenMinutes` | 10 | Thời hạn access token (phút) |
+| `Identity:RefreshTokenDays` | 14 | Thời hạn refresh token (ngày) |
+| `Identity:MembershipCacheSeconds` | 30 | Cache kiểm tra membership trên API instance (trễ tối đa khi thu hồi quyền) |
+| `Identity:RateLimitPerMinute` | 60 | Giới hạn request/phút/IP cho endpoint đăng nhập & OIDC trên mỗi instance |
+| `Identity:Clients:RedirectUris` | `["https://{domain}/signin-callback"]` | Mẫu redirect URI cho OAuth client của từng tenant |
+| `Identity:Keys:Path` | `"keys"` | Thư mục chứa cert ký/mã hoá token (`signing-*.pfx`, `encryption-*.pfx`) |
+| `Identity:Keys:AutoGenerate` | `false` | Tự sinh cert self-signed khi trống (chỉ dùng cho dev/demo) |
+| `Identity:Google:*` / `Microsoft:*` | *(trống)* | `ClientId` / `ClientSecret` cho social login (chỉ bật khi cấu hình đủ) |
 | `Shell:ShutdownTimeoutSeconds` | 30 | Thời gian chờ request đang chạy khi nhận SIGTERM |
+| `Shell:TrustForwardedHeaders` | `false` | Tin tưởng `X-Forwarded-For` / `X-Forwarded-Proto` từ reverse proxy |
 | `Serilog:MinimumLevel:Default` | Information | Log ra console dạng JSON |
 
 ## Lưu ý vận hành
 
-- ⚠️ **Chưa có xác thực.** Bất kỳ ai gọi đúng domain đều đọc/ghi được dữ liệu tenant đó. Với `AllowHostHeaderOverride = true` thì chỉ cần đổi header. Xem [extension-points.md](extension-points.md#1-identity--phân-quyền).
+- **Xác thực & cách ly tenant:** `Shell.Identity` cấp access token gắn `tenant_id` qua Authorization Code + PKCE trên Auth host (`Identity:Issuer`). Các tenant host xác thực Bearer token và kiểm tra membership đang hoạt động (`tenant-member` / `tenant-admin`). Dùng `dotnet Host.dll disable-user <email>` / `enable-user <email>` để khoá/mở tài khoản khẩn cấp.
 - Thêm/khoá tenant hoặc đổi domain trong Catalog: mỗi instance thấy thay đổi sau tối đa `CacheMinutes` (domain mới bị 404 trước đó: tối đa `NotFoundCacheSeconds`).
 - Thêm tenant Silo: tạo dòng trong Catalog rồi chạy `migrate`. Lệnh này tự tạo DB riêng và migrate mọi module trên DB đó.
 - Migration **không** tự chạy khi khởi động: chạy `dotnet Host.dll migrate` (hoặc `docker run <image> migrate`) trước khi deploy.

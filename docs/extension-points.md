@@ -4,21 +4,14 @@ Những thứ **cố ý chưa làm**, kèm nơi gắn vào khi cần. Nguyên t�
 
 ## 1. Identity / phân quyền
 
-**Bắt buộc trước production.** Hiện tại ai gọi đúng domain đều đọc/ghi được dữ liệu tenant đó.
+Phần lõi xác thực và ràng buộc user ↔ tenant **đã được triển khai trong `Shell.Identity`** (xem [adr.md](adr.md#adr-006-identity-t%E1%BA%ADp-trung-%E1%BB%9F-catalog-db-t%C3%A1ch-auth-host-v%C3%A0-g%E1%BA%AFn-token-v%C3%A0o-tenant)): OpenIddict (Authorization Code + PKCE, refresh token), ASP.NET Core Identity, Razor Pages (`/account/*`) trên auth host, kiểm tra claim `tenant_id` + trạng thái membership trong `TenantAccessMiddleware`, policy `tenant-member` / `tenant-admin`, và `/iam/*`.
 
-```csharp
-// Host/Program.cs
-builder.Services.AddAuthentication(...).AddJwtBearer(...);   // hoặc cookie/OIDC
-builder.Services.AddAuthorization();
+Những điểm mở rộng còn lại trên nền `Shell.Identity`:
 
-app.UseTenantResolution();
-app.UseAuthentication();
-app.UseAuthorization();
-```
-
-- **Ràng buộc user ↔ tenant**: sau khi xác thực, kiểm tra claim tenant của user (ví dụ `tenant_id`) khớp `ITenantContext.Current.Id`, lệch thì trả 403. Đặt kiểm tra này trong một middleware ngay sau `UseAuthorization`.
+- **Phân quyền chi tiết theo module**: mở rộng `IModule` để khai báo permission (ví dụ `products.write`), ánh xạ qua role và kiểm tra bằng `RequirePermission(...)`.
+- **Client máy-máy / tích hợp ngoài**: hỗ trợ `client_credentials` gắn tenant cho hệ thống đối tác với scope giới hạn.
+- **Gửi email thật**: thay `LoggingAccountEmailSender` bằng implementation SMTP / SendGrid / SES qua `services.AddSingleton<IAccountEmailSender, ...>()`.
 - Tắt `Tenancy:AllowHostHeaderOverride` ở production. Nếu cần chọn tenant qua header (mobile app, API key), chỉ chấp nhận khi header khớp claim.
-- Endpoint module: `.RequireAuthorization(...)` trong `MapEndpoints`. Muốn mọi endpoint module mặc định cần đăng nhập: thêm `.RequireAuthorization()` cho group trong `ShellServiceCollectionExtensions.MapModules`.
 
 ## 2. Quản lý tenant
 

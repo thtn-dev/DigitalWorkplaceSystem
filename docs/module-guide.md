@@ -120,13 +120,12 @@ Không cần đăng ký gì thêm: lệnh `migrate` tự áp migration này lên
 ## 5. Đưa module vào solution và Host
 
 ```bash
-dotnet sln Shell.slnx add src/Modules/Orders src/Modules/Orders.Contracts
-dotnet add src/Host/Host.csproj                         reference src/Modules/Orders/Modules.Orders.csproj
-dotnet add tests/Shell.UnitTests/Shell.UnitTests.csproj reference src/Modules/Orders/Modules.Orders.csproj
+dotnet sln DigitalWorkspace.slnx add src/Modules/Orders src/Modules/Orders.Contracts
+dotnet add src/Host/Host.csproj reference src/Modules/Orders/Modules.Orders.csproj
 ```
 
 - Reference trong **Host** chỉ để DLL được copy ra output; Host không gọi code module trực tiếp.
-- Reference trong **Shell.UnitTests** để architecture test kiểm tra module mới. Thiếu bước này thì test vẫn xanh nhưng module **không được kiểm tra**.
+- **`Shell.UnitTests.csproj` tự động tham chiếu mọi `src/Modules/*/*.csproj` qua wildcard**, và `ArchitectureTests` kiểm tra mọi project `Modules.*.csproj` trên đĩa đều được nạp vào test — không cần thêm tay vào `Shell.UnitTests`.
 - Dockerfile không cần sửa.
 
 ## 6. Dùng module khác (qua Contracts)
@@ -158,11 +157,11 @@ Nhớ khai báo `"products"` trong `DependsOn` của Orders.
 
 ```bash
 docker compose up -d postgres
-dotnet build Shell.slnx
+dotnet build DigitalWorkspace.slnx
 dotnet run --project src/Host -- migrate     # migrate Orders trên DB chung và DB riêng của tenant B
 dotnet run --project src/Host                # log "Loaded modules in order: [products, orders]"
 curl localhost:5080/api/orders -H "X-Tenant-Host: tenant-a.localhost"
-dotnet test --solution Shell.slnx
+dotnet test --solution DigitalWorkspace.slnx
 ```
 
 ## Checklist
@@ -173,6 +172,6 @@ dotnet test --solution Shell.slnx
 - [ ] DbContext kế thừa `TenantDbContext`, cấu hình trong `ConfigureModel`, có `HasDefaultSchema`
 - [ ] Đăng ký bằng `AddModuleDbContext`, có design-time factory
 - [ ] Migration đã tạo trong `Data/Migrations`
-- [ ] Đã thêm vào `Shell.slnx`, `Host.csproj`, `Shell.UnitTests.csproj`
+- [ ] Đã thêm vào `DigitalWorkspace.slnx` và `Host.csproj` (`Shell.UnitTests.csproj` tự quét `src/Modules/*/*.csproj`)
 - [ ] Chỉ tham chiếu `*.Contracts` của module khác
 - [ ] `dotnet test` xanh
