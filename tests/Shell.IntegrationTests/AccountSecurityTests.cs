@@ -183,7 +183,11 @@ public partial class AccountSecurityTests(PostgresFixture db)
         var browser = new OidcTestClient(host);
         await browser.PostFormAsync("/account/forgot-password", new() { ["Email"] = email });
         var resetMessage = smtp.SingleMessageTo(email);
-        var resetLink = new Uri(LoopbackSmtpServer.FirstLinkIn(resetMessage)).PathAndQuery();
+        var plainResetLink = LoopbackSmtpServer.FirstLinkIn(resetMessage);
+        var htmlResetHref = HtmlHref().Match(resetMessage.HtmlBody);
+        Assert.True(htmlResetHref.Success);
+        Assert.Equal(plainResetLink, WebUtility.HtmlDecode(htmlResetHref.Groups[1].Value));
+        var resetLink = new Uri(plainResetLink).PathAndQuery();
         Assert.Equal(HttpStatusCode.Redirect, (await browser.PostFormAsync(resetLink, new() { ["Password"] = "New-Passw0rd-2" })).StatusCode);
         Assert.Equal(HttpStatusCode.Redirect, (await new OidcTestClient(host).SubmitLoginAsync(email, "New-Passw0rd-2")).StatusCode);
 
@@ -202,7 +206,12 @@ public partial class AccountSecurityTests(PostgresFixture db)
         Assert.Contains("&lt;script&gt;alert(1)&lt;/script&gt;", inviteMessage.HtmlBody);
         Assert.DoesNotContain("<script>", inviteMessage.HtmlBody, StringComparison.OrdinalIgnoreCase);
 
-        var inviteLink = new Uri(LoopbackSmtpServer.FirstLinkIn(inviteMessage)).PathAndQuery();
+        var plainInviteLink = LoopbackSmtpServer.FirstLinkIn(inviteMessage);
+        var htmlInviteHref = HtmlHref().Match(inviteMessage.HtmlBody);
+        Assert.True(htmlInviteHref.Success);
+        Assert.Equal(plainInviteLink, WebUtility.HtmlDecode(htmlInviteHref.Groups[1].Value));
+
+        var inviteLink = new Uri(plainInviteLink).PathAndQuery();
         var invitee = new OidcTestClient(host);
         await invitee.RegisterAsync(invitedEmail, Password);
         var acceptedHtml = await (await invitee.PostFormAsync(inviteLink, new(), tokenPage: "/account/login")).Content.ReadAsStringAsync(Ct);
@@ -270,6 +279,9 @@ public partial class AccountSecurityTests(PostgresFixture db)
 
     [GeneratedRegex("<li>([a-zA-Z0-9-]+)</li>")]
     private static partial Regex RecoveryCode();
+
+    [GeneratedRegex("href=\"([^\"]+)\"")]
+    private static partial Regex HtmlHref();
 }
 
 internal static class UriExtensions

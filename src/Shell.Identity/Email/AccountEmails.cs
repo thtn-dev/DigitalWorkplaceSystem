@@ -67,13 +67,14 @@ internal sealed class SmtpAccountEmailSender(IOptions<ShellIdentityOptions> opti
             BodyEncoding = Encoding.UTF8,
             IsBodyHtml = false,
         };
-        using var htmlView = AlternateView.CreateAlternateViewFromString(htmlBody, Encoding.UTF8, MediaTypeNames.Text.Html);
+        var htmlView = AlternateView.CreateAlternateViewFromString(htmlBody, Encoding.UTF8, MediaTypeNames.Text.Html);
         message.AlternateViews.Add(htmlView);
 
         using var client = new SmtpClient(email.Host!, email.Port)
         {
             EnableSsl = email.UseSsl,
             DeliveryMethod = SmtpDeliveryMethod.Network,
+            Timeout = 10_000,
         };
         if (!string.IsNullOrEmpty(email.Username))
         {
