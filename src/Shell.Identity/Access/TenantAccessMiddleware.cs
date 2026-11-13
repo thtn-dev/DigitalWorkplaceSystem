@@ -58,7 +58,7 @@ internal sealed class TenantAccessMiddleware(RequestDelegate next, ILogger<Tenan
 /// <summary>Authorization-server routes answer on the issuer host only; on tenant hosts they do not exist.</summary>
 internal sealed class AuthHostGuardMiddleware(RequestDelegate next, IOptions<ShellIdentityOptions> options)
 {
-    private static readonly PathString[] AuthPaths = ["/connect", "/account", "/invitations", "/tenants", "/.well-known", "/signin-google", "/signin-microsoft"];
+    private static readonly PathString[] AuthPaths = ["/connect", "/account", "/invitations", "/tenants", "/admin", "/.well-known", "/signin-google", "/signin-microsoft"];
 
     public Task InvokeAsync(HttpContext context)
     {

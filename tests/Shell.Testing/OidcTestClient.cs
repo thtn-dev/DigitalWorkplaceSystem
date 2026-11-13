@@ -144,6 +144,17 @@ public sealed partial class OidcTestClient(ShellHostFactory host)
 
     public Task<HttpResponseMessage> GetAsync(string url) => _browser.GetAsync(url, Ct);
 
+    public async Task<HttpResponseMessage> SendJsonAsync(HttpMethod method, string url, object? body = null)
+    {
+        using var request = new HttpRequestMessage(method, url);
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        return await _browser.SendAsync(request, Ct);
+    }
+
     /// <summary>
     /// Submits a form of the authorization server like a browser: takes the antiforgery token from <paramref name="tokenPage"/>
     /// (default: the same URL), then posts the fields.

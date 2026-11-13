@@ -279,6 +279,7 @@ public static class ShellIdentityExtensions
     {
         var authHost = endpoints.ServiceProvider.GetRequiredService<IOptions<ShellIdentityOptions>>().Value.AuthHost;
         AuthorizationEndpoints.Map(endpoints.MapGroup("").RequireHost(authHost).RequireRateLimiting(AuthRateLimit).ExcludeFromDescription());
+        AdminEndpoints.Map(endpoints, authHost);
         endpoints.MapRazorPages().RequireHost(authHost).RequireRateLimiting(AuthRateLimit);
         IamEndpoints.Map(endpoints);
         return endpoints;
