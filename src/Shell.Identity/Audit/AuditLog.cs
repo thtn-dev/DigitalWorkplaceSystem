@@ -26,6 +26,8 @@ public static class AuditEvents
     public const string InvitationCreated = "invitation.created";
     public const string InvitationRevoked = "invitation.revoked";
     public const string InvitationAccepted = "invitation.accepted";
+    public const string EmailConfirmed = "user.email_confirmed";
+    public const string TenantCreated = "tenant.created";
 }
 
 /// <summary>

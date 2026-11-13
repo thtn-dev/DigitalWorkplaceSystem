@@ -32,7 +32,7 @@ public sealed class ConnectionStringsOptions
     [Required(ErrorMessage = "ConnectionStrings:DefaultShared is required (env: ConnectionStrings__DefaultShared).")]
     public string DefaultShared { get; set; } = "";
 
-    internal static bool IsValid(string value)
+    public static bool IsValid(string value)
     {
         try
         {

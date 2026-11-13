@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Modules.Products.Contracts;
 using Shell.Core.Tenancy;
+using Shell.Identity;
 using Shell.Identity.Data;
 
 namespace Shell.IntegrationTests;
@@ -158,6 +159,54 @@ public class TenancyTests(PostgresFixture db)
 
         Assert.Equal(1, await db.CountAsync(siloCs, $"SELECT count(*) FROM products.products WHERE name = '{productName}'"));
         Assert.Equal(0, await db.CountAsync(db.SharedConnectionString, $"SELECT count(*) FROM products.products WHERE name = '{productName}'"));
+    }
+
+    [Fact]
+    public async Task Create_tenant_command_provisions_pool_tenant_for_existing_owner_and_silo_tenant_for_invited_owner()
+    {
+        await using var host = db.CreateHost();
+        var client = host.CreateClient();
+
+        // 1. Pool tenant with existing user (Bob) -> Bob immediately gets active Owner membership.
+        var poolDomain = $"cli-pool-{Guid.NewGuid():N}.localhost";
+        var exitPool = await IdentityCommands.RunAsync(
+            host.Services,
+            ["create-tenant", "CLI Pool Co", poolDomain, DemoUserSeeder.Bob],
+            Ct);
+        Assert.Equal(0, exitPool);
+
+        var poolTenantId = await db.TenantIdAsync(poolDomain);
+        var bobTokens = await new OidcTestClient(host).GetTokensAsync(DemoUserSeeder.Bob, DemoUserSeeder.Password, poolTenantId, poolDomain);
+        var createdPoolProduct = await CreateProductAsync(client, poolDomain, $"pool-{Guid.NewGuid()}", bobTokens.AccessToken);
+        Assert.NotEqual(Guid.Empty, createdPoolProduct.Id);
+        Assert.Equal(1, await db.CountAsync(db.CatalogConnectionString,
+            $"SELECT count(*) FROM identity.audit_events WHERE tenant_id = '{poolTenantId}' AND type = 'tenant.created'"));
+
+        // 2. Silo tenant with a brand-new owner email -> migrates Silo DB and sends owner invitation link.
+        var siloDomain = $"cli-silo-{Guid.NewGuid():N}.localhost";
+        var siloCs = db.ForDatabase($"shell_cli_silo_{Guid.NewGuid():N}");
+        var newOwnerEmail = $"founder-{Guid.NewGuid():N}@test.local";
+        var exitSilo = await IdentityCommands.RunAsync(
+            host.Services,
+            ["create-tenant", "CLI Silo Inc", siloDomain, newOwnerEmail, "--silo", siloCs],
+            Ct);
+        Assert.Equal(0, exitSilo);
+
+        var inviteLink = db.Emails.LastLinkTo(newOwnerEmail);
+        var founder = new OidcTestClient(host);
+        await founder.RegisterAsync(newOwnerEmail, DemoUserSeeder.Password);
+        var acceptHtml = await (await founder.PostFormAsync(inviteLink, new(), tokenPage: "/account/login")).Content.ReadAsStringAsync(Ct);
+        Assert.Contains("id=\"accepted\"", acceptHtml);
+
+        var siloTenantId = await db.TenantIdAsync(siloDomain);
+        var founderTokens = await founder.GetTokensAsync(newOwnerEmail, DemoUserSeeder.Password, siloTenantId, siloDomain);
+        var siloProductName = $"silo-cli-{Guid.NewGuid()}";
+        await CreateProductAsync(client, siloDomain, siloProductName, founderTokens.AccessToken);
+        Assert.Equal(1, await db.CountAsync(siloCs, $"SELECT count(*) FROM products.products WHERE name = '{siloProductName}'"));
+
+        // 3. Duplicate domain or platform host is rejected with exit code 1.
+        Assert.Equal(1, await IdentityCommands.RunAsync(host.Services, ["create-tenant", "Dup", poolDomain, DemoUserSeeder.Bob], Ct));
+        Assert.Equal(1, await IdentityCommands.RunAsync(host.Services, ["create-tenant", "AuthHost", ShellHostFactory.AuthHost, DemoUserSeeder.Bob], Ct));
     }
 
     private async Task<string> AliceTokenAsync(OidcTestClient browser, string domain) =>

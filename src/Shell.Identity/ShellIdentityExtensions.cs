@@ -26,6 +26,7 @@ using Shell.Identity.Data;
 using Shell.Identity.Email;
 using Shell.Identity.Endpoints;
 using Shell.Identity.Keys;
+using Shell.Identity.Tenants;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Shell.Identity;
@@ -211,6 +212,7 @@ public static class ShellIdentityExtensions
         services.AddScoped<GrantRevoker>();
         services.AddScoped<MembershipService>();
         services.AddScoped<UserAccountService>();
+        services.AddScoped<TenantProvisioningService>();
         services.AddScoped<AuditLog>();
         services.AddSingleton<AccountLinks>();
         services.TryAddSingleton<IAccountEmailSender>(sp =>

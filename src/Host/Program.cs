@@ -18,15 +18,39 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
-    // One-shot commands, run instead of the web host (see IdentityCommands for the account ones):
-    //   migrate                   migrate (and optionally seed) the databases; never done on normal start-up
-    //   disable-user <email>      block sign-in and revoke every grant;  enable-user <email>
-    var (command, operand, hostArgs) = args switch
+    // One-shot commands, run instead of the web host (see IdentityCommands for the account/tenant ones):
+    //   migrate                                                        migrate (and optionally seed) the databases; never done on normal start-up
+    //   disable-user <email> | enable-user <email>                     block/allow sign-in and revoke every grant
+    //   create-tenant <name> <domain> <owner-email> [--silo <cs>]      create a Pool or Silo tenant and assign/invite its owner
+    string[]? commandArgs;
+    string[] hostArgs;
+    switch (args)
     {
-        ["migrate", .. var rest] => ("migrate", null, rest),
-        [var name and ("disable-user" or "enable-user"), var value, .. var rest] => (name, value, rest),
-        _ => ((string?)null, (string?)null, args),
-    };
+        case ["migrate", .. var rest]:
+            commandArgs = ["migrate"];
+            hostArgs = rest;
+            break;
+        case [var name and ("disable-user" or "enable-user"), var value, .. var rest]:
+            commandArgs = [name, value];
+            hostArgs = rest;
+            break;
+        case ["create-tenant", var name, var domain, var ownerEmail, "--silo", var cs, .. var rest]:
+            commandArgs = ["create-tenant", name, domain, ownerEmail, "--silo", cs];
+            hostArgs = rest;
+            break;
+        case ["create-tenant", var name, var domain, var ownerEmail, .. var rest]:
+            commandArgs = ["create-tenant", name, domain, ownerEmail];
+            hostArgs = rest;
+            break;
+        case ["create-tenant", ..]:
+            commandArgs = args;
+            hostArgs = [];
+            break;
+        default:
+            commandArgs = null;
+            hostArgs = args;
+            break;
+    }
     var builder = WebApplication.CreateBuilder(hostArgs);
 
     builder.Services.AddSerilog(
@@ -63,15 +87,15 @@ try
 
     await using var app = builder.Build();
 
-    if (command == "migrate")
+    if (commandArgs is ["migrate"])
     {
         await app.Services.GetRequiredService<MigrationRunner>().RunAsync(CancellationToken.None);
         return 0;
     }
 
-    if (command is not null)
+    if (commandArgs is not null)
     {
-        return await IdentityCommands.RunAsync(app.Services, command, operand!, CancellationToken.None);
+        return await IdentityCommands.RunAsync(app.Services, commandArgs, CancellationToken.None);
     }
 
     app.UseForwardedHeaders();
