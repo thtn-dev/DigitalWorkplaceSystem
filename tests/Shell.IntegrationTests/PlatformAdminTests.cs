@@ -76,36 +76,45 @@ public sealed class PlatformAdminTests(PostgresFixture db)
         var token = (await browser.GetTokensAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, tenantAId, DemoTenantSeeder.PoolTenantDomain)).AccessToken!;
         using var apiClient = host.CreateClient();
 
+        // Mutating admin endpoint without antiforgery token is rejected with 400.
+        Assert.Equal(HttpStatusCode.BadRequest, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/lock")).StatusCode);
+
         // Lock tenant -> immediate 403 on tenant host.
-        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/lock")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/lock")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await GetProductsAsync(apiClient, DemoTenantSeeder.PoolTenantDomain, token)).StatusCode);
         Assert.True(await db.CountAsync(db.CatalogConnectionString,
             $"SELECT count(*) FROM identity.audit_events WHERE tenant_id = '{tenantAId}' AND type = 'tenant.locked'") >= 1);
 
         // Unlock tenant -> 200 restored.
-        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/unlock")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/unlock")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await GetProductsAsync(apiClient, DemoTenantSeeder.PoolTenantDomain, token)).StatusCode);
         Assert.True(await db.CountAsync(db.CatalogConnectionString,
             $"SELECT count(*) FROM identity.audit_events WHERE tenant_id = '{tenantAId}' AND type = 'tenant.unlocked'") >= 1);
 
-        // Domain validation, duplicate conflict, add/remove, and last-domain guard.
-        Assert.Equal(HttpStatusCode.BadRequest, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = "bad:5080" })).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = DemoTenantSeeder.PoolTenantDomain })).StatusCode);
+        // Domain validation (trailing dot, port), PlatformHosts conflict, duplicate conflict, add/remove + OAuth client sync, and last-domain guard.
+        Assert.Equal(HttpStatusCode.BadRequest, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = "bad:5080" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = "trailing.localhost." })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = ShellHostFactory.AuthHost })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = DemoTenantSeeder.PoolTenantDomain })).StatusCode);
 
         var customDomain = $"custom-{Guid.NewGuid():N}.localhost";
-        var addResponse = await browser.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = $"  {customDomain.ToUpperInvariant()}  " });
+        var addResponse = await browser.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/domains", new { Domain = $"  {customDomain.ToUpperInvariant()}  " });
         Assert.Equal(HttpStatusCode.Created, addResponse.StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await GetProductsAsync(apiClient, customDomain, token)).StatusCode);
+        var addedAuth = await browser.AuthorizeAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, tenantAId, customDomain);
+        Assert.NotNull(addedAuth.Code);
         Assert.True(await db.CountAsync(db.CatalogConnectionString,
             $"SELECT count(*) FROM identity.audit_events WHERE tenant_id = '{tenantAId}' AND type = 'tenant.domain_added'") >= 1);
 
-        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendJsonAsync(HttpMethod.Delete, $"/admin/tenants/{tenantAId}/domains/{customDomain}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendAdminAsync(HttpMethod.Delete, $"/admin/tenants/{tenantAId}/domains/{customDomain}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await GetProductsAsync(apiClient, customDomain, token)).StatusCode);
+        var removedAuth = await browser.AuthorizeAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, tenantAId, customDomain);
+        Assert.Null(removedAuth.Code);
         Assert.True(await db.CountAsync(db.CatalogConnectionString,
             $"SELECT count(*) FROM identity.audit_events WHERE tenant_id = '{tenantAId}' AND type = 'tenant.domain_removed'") >= 1);
 
         // Cannot delete last remaining domain.
-        Assert.Equal(HttpStatusCode.Conflict, (await browser.SendJsonAsync(HttpMethod.Delete, $"/admin/tenants/{tenantAId}/domains/{DemoTenantSeeder.PoolTenantDomain}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await browser.SendAdminAsync(HttpMethod.Delete, $"/admin/tenants/{tenantAId}/domains/{DemoTenantSeeder.PoolTenantDomain}")).StatusCode);
 
         // Restore Alice admin flag to false cleanly.
         Assert.Equal(0, await IdentityCommands.RunAsync(host.Services, ["revoke-admin", DemoUserSeeder.Alice], Ct));
@@ -127,16 +136,55 @@ public sealed class PlatformAdminTests(PostgresFixture db)
         Assert.True(alice.IsPlatformAdmin);
 
         // Self-disable is rejected.
-        Assert.Equal(HttpStatusCode.Conflict, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/users/{alice.Id}/disable")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/users/{alice.Id}/disable")).StatusCode);
 
         // Disable then enable Bob.
-        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/users/{bob.Id}/disable")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/users/{bob.Id}/disable")).StatusCode);
         Assert.Equal("true", await db.ScalarAsync($"SELECT is_disabled::text FROM identity.users WHERE id = '{bob.Id}'"));
 
-        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendJsonAsync(HttpMethod.Post, $"/admin/users/{bob.Id}/enable")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await browser.SendAdminAsync(HttpMethod.Post, $"/admin/users/{bob.Id}/enable")).StatusCode);
         Assert.Equal("false", await db.ScalarAsync($"SELECT is_disabled::text FROM identity.users WHERE id = '{bob.Id}'"));
 
         Assert.Equal(0, await IdentityCommands.RunAsync(host.Services, ["revoke-admin", DemoUserSeeder.Alice], Ct));
+    }
+
+    [Fact]
+    public async Task Concurrent_domain_add_and_delete_preserve_uniqueness_and_last_domain_invariant()
+    {
+        await using var host = db.CreateHost();
+        var domain1 = $"c1-{Guid.NewGuid():N}.localhost";
+        var domain2 = $"c2-{Guid.NewGuid():N}.localhost";
+        Assert.Equal(0, await IdentityCommands.RunAsync(host.Services, ["create-tenant", "Race Domain Co", domain1, DemoUserSeeder.Alice], Ct));
+        var tenantId = await db.TenantIdAsync(domain1);
+
+        Assert.Equal(0, await IdentityCommands.RunAsync(host.Services, ["grant-admin", DemoUserSeeder.Alice], Ct));
+        try
+        {
+            var browser1 = new OidcTestClient(host);
+            var browser2 = new OidcTestClient(host);
+            Assert.Equal(HttpStatusCode.Redirect, (await browser1.SubmitLoginAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password)).StatusCode);
+            Assert.Equal(HttpStatusCode.Redirect, (await browser2.SubmitLoginAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password)).StatusCode);
+
+            // Concurrent adds of the same domain: one 201, one 409 (never 500).
+            var addResults = await Task.WhenAll(
+                browser1.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantId}/domains", new { Domain = domain2 }),
+                browser2.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantId}/domains", new { Domain = domain2 }));
+            Assert.Equal(1, addResults.Count(r => r.StatusCode == HttpStatusCode.Created));
+            Assert.Equal(1, addResults.Count(r => r.StatusCode == HttpStatusCode.Conflict));
+
+            // Concurrent deletes of the two remaining domains: one 204, one 409 (at least 1 domain remains).
+            var delResults = await Task.WhenAll(
+                browser1.SendAdminAsync(HttpMethod.Delete, $"/admin/tenants/{tenantId}/domains/{domain1}"),
+                browser2.SendAdminAsync(HttpMethod.Delete, $"/admin/tenants/{tenantId}/domains/{domain2}"));
+            Assert.Equal(1, delResults.Count(r => r.StatusCode == HttpStatusCode.NoContent));
+            Assert.Equal(1, delResults.Count(r => r.StatusCode == HttpStatusCode.Conflict));
+            Assert.Equal(1, await db.CountAsync(db.CatalogConnectionString,
+                $"SELECT count(*) FROM catalog.tenant_domains WHERE tenant_id = '{tenantId}'"));
+        }
+        finally
+        {
+            Assert.Equal(0, await IdentityCommands.RunAsync(host.Services, ["revoke-admin", DemoUserSeeder.Alice], Ct));
+        }
     }
 
     private static async Task<HttpResponseMessage> GetProductsAsync(HttpClient client, string domain, string accessToken)

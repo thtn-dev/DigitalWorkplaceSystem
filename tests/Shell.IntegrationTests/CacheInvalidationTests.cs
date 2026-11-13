@@ -29,7 +29,7 @@ public sealed class CacheInvalidationTests(PostgresFixture db)
         // Lock tenant via hostA /admin API.
         Assert.Equal(0, await IdentityCommands.RunAsync(hostA.Services, ["grant-admin", DemoUserSeeder.Alice], Ct));
         Assert.Equal(HttpStatusCode.Redirect, (await browserA.SubmitLoginAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password)).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await browserA.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/lock")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await browserA.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/lock")).StatusCode);
 
         try
         {
@@ -39,7 +39,7 @@ public sealed class CacheInvalidationTests(PostgresFixture db)
         }
         finally
         {
-            await browserA.SendJsonAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/unlock");
+            await browserA.SendAdminAsync(HttpMethod.Post, $"/admin/tenants/{tenantAId}/unlock");
             await IdentityCommands.RunAsync(hostA.Services, ["revoke-admin", DemoUserSeeder.Alice], Ct);
         }
 

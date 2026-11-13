@@ -155,6 +155,24 @@ public sealed partial class OidcTestClient(ShellHostFactory host)
         return await _browser.SendAsync(request, Ct);
     }
 
+    /// <summary>Fetches an antiforgery token from <c>/admin/antiforgery</c> and sends a JSON/command request carrying its header.</summary>
+    public async Task<HttpResponseMessage> SendAdminAsync(HttpMethod method, string url, object? body = null)
+    {
+        var tokenResponse = await _browser.GetAsync("/admin/antiforgery", Ct);
+        var csrf = (await tokenResponse.Content.ReadFromJsonAsync<AntiforgeryTokenResponse>(Ct))!;
+
+        using var request = new HttpRequestMessage(method, url);
+        request.Headers.Add(csrf.HeaderName, csrf.Token);
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        return await _browser.SendAsync(request, Ct);
+    }
+
+    private sealed record AntiforgeryTokenResponse(string HeaderName, string Token);
+
     /// <summary>
     /// Submits a form of the authorization server like a browser: takes the antiforgery token from <paramref name="tokenPage"/>
     /// (default: the same URL), then posts the fields.

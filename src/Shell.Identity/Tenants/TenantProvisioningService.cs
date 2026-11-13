@@ -247,7 +247,7 @@ public sealed partial class TenantProvisioningService(
     }
 
     [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")]
-    private static partial Regex DomainPattern();
+    internal static partial Regex DomainPattern();
 
     [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")]
     private static partial Regex SlugPattern();
