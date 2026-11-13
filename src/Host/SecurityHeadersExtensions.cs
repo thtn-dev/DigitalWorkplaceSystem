@@ -8,9 +8,9 @@ public static class SecurityHeadersExtensions
     private const string DefaultCsp =
         "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'";
 
-    public static IApplicationBuilder UseSecurityHeaders(this WebApplication app)
+    public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app)
     {
-        var requireHttps = app.Services.GetRequiredService<IOptions<ShellIdentityOptions>>().Value.RequireHttps;
+        var requireHttps = app.ApplicationServices.GetRequiredService<IOptions<ShellIdentityOptions>>().Value.RequireHttps;
 
         return app.Use((context, next) =>
         {
