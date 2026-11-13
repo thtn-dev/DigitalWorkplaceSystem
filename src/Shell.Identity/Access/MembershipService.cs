@@ -80,7 +80,7 @@ public sealed class MembershipService(
         membership.Role = role;
         membership.UpdatedAt = time.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        access.Invalidate(tenantId, userId);
+        await access.InvalidateAsync(tenantId, userId, ct);
         return IamResult.Ok;
     }
 
@@ -112,7 +112,7 @@ public sealed class MembershipService(
         }
 
         await grants.RevokeAsync(userId, tenantId, ct);
-        access.Invalidate(tenantId, userId);
+        await access.InvalidateAsync(tenantId, userId, ct);
         return IamResult.Ok;
     }
 
@@ -137,7 +137,7 @@ public sealed class MembershipService(
             await db.SaveChangesAsync(ct);
         }
 
-        access.Invalidate(tenantId, userId);
+        await access.InvalidateAsync(tenantId, userId, ct);
         return IamResult.Ok;
     }
 
@@ -280,7 +280,7 @@ public sealed class MembershipService(
         audit.Add(AuditEvents.InvitationAccepted, user.Id, invitation.TenantId, data: new { role = invitation.Role });
         await db.SaveChangesAsync(ct);
 
-        access.Invalidate(invitation.TenantId, user.Id);
+        await access.InvalidateAsync(invitation.TenantId, user.Id, ct);
         return IamResult.Ok;
     }
 

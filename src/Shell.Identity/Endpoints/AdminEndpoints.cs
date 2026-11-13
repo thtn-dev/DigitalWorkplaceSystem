@@ -97,7 +97,7 @@ internal static class AdminEndpoints
 
         foreach (var domain in tenant.Domains)
         {
-            tenants.Invalidate(domain.Domain, tenant.Id);
+            await tenants.InvalidateAsync(domain.Domain, tenant.Id, ct);
         }
 
         return Results.NoContent();
@@ -131,7 +131,7 @@ internal static class AdminEndpoints
         catalog.TenantDomains.Add(new TenantDomain { Id = Guid.CreateVersion7(), TenantId = id, Domain = domain });
         await catalog.SaveChangesAsync(ct);
         await audit.RecordAsync(AuditEvents.TenantDomainAdded, tenantId: id, actorId: ActorId(http), data: new { domain });
-        tenants.Invalidate(domain, id);
+        await tenants.InvalidateAsync(domain, id, ct);
 
         return Results.Created($"/admin/tenants/{id}/domains/{domain}", new { tenantId = id, domain });
     }
@@ -161,7 +161,7 @@ internal static class AdminEndpoints
         catalog.TenantDomains.Remove(target);
         await catalog.SaveChangesAsync(ct);
         await audit.RecordAsync(AuditEvents.TenantDomainRemoved, tenantId: id, actorId: ActorId(http), data: new { domain });
-        tenants.Invalidate(domain, id);
+        await tenants.InvalidateAsync(domain, id, ct);
 
         return Results.NoContent();
     }

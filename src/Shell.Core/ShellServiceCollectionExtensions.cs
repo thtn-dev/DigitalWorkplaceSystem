@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using Shell.Abstractions;
 using Shell.Abstractions.Security;
 using Shell.Abstractions.Tenancy;
+using Shell.Core.Caching;
 using Shell.Core.Data;
 using Shell.Core.Modules;
 using Shell.Core.Security;
@@ -52,6 +53,8 @@ public static class ShellServiceCollectionExtensions
         services.AddScoped<ITenantConnectionStringProvider, TenantConnectionStringProvider>();
         services.AddScoped<TenantStore>();
         services.AddScoped<DemoTenantSeeder>();
+        services.TryAddSingleton<ICacheInvalidationBus, PostgresCacheInvalidationBus>();
+        services.AddHostedService<PostgresCacheInvalidationListener>();
 
         // Authorization of module endpoints (authentication itself is plugged in by the host, e.g. Shell.Identity).
         services.AddScoped<CurrentUser>();

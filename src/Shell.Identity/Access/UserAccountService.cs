@@ -56,7 +56,7 @@ public sealed class UserAccountService(
 
         foreach (var tenantId in await db.Memberships.Where(m => m.UserId == user.Id).Select(m => m.TenantId).ToListAsync(ct))
         {
-            access.Invalidate(tenantId, user.Id);
+            await access.InvalidateAsync(tenantId, user.Id, ct);
         }
 
         return true;

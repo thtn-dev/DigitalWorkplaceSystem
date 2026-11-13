@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Shell.Core.Caching;
 using Shell.Identity.Data;
 
 namespace Shell.Identity.Access;
@@ -12,7 +13,11 @@ public sealed record TenantAccess(string Role);
 /// Single rule deciding whether a user may access a tenant: enabled account, active membership, and a managed account
 /// only in the tenant that manages it. Used when issuing tokens (uncached) and on every API request (cached briefly).
 /// </summary>
-public sealed class TenantAccessService(AuthDbContext db, IMemoryCache cache, IOptions<ShellIdentityOptions> options)
+public sealed class TenantAccessService(
+    AuthDbContext db,
+    IMemoryCache cache,
+    IOptions<ShellIdentityOptions> options,
+    ICacheInvalidationBus? invalidationBus = null)
 {
     /// <summary>Fresh answer from the database. Null: no access.</summary>
     public Task<TenantAccess?> CheckAsync(Guid tenantId, Guid userId, CancellationToken cancellationToken) =>
@@ -43,7 +48,17 @@ public sealed class TenantAccessService(AuthDbContext db, IMemoryCache cache, IO
 
     public void Invalidate(Guid tenantId, Guid userId) => cache.Remove(CacheKey(tenantId, userId));
 
-    private static string CacheKey(Guid tenantId, Guid userId) => $"membership:{tenantId}:{userId}";
+    /// <summary>Evicts cached membership access locally and notifies other host instances via <see cref="ICacheInvalidationBus"/>.</summary>
+    public async Task InvalidateAsync(Guid tenantId, Guid userId, CancellationToken ct = default)
+    {
+        Invalidate(tenantId, userId);
+        if (invalidationBus is not null)
+        {
+            await invalidationBus.PublishMembershipAsync(tenantId, userId, ct);
+        }
+    }
+
+    private static string CacheKey(Guid tenantId, Guid userId) => CacheInvalidationKeys.Membership(tenantId, userId);
 
     private sealed record CachedAccess(TenantAccess? Access);
 }

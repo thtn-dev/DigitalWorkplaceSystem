@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Shell.Abstractions.Tenancy;
+using Shell.Core.Caching;
 
 namespace Shell.Core.Tenancy;
 
@@ -9,12 +10,16 @@ namespace Shell.Core.Tenancy;
 /// Finds the tenant of a domain: in-memory cache first, catalog DB on a miss.
 /// Unknown domains are cached too (negative caching) so they cannot hammer the catalog.
 /// </summary>
-public sealed class TenantStore(CatalogDbContext catalog, IMemoryCache cache, IOptions<TenancyOptions> options)
+public sealed class TenantStore(
+    CatalogDbContext catalog,
+    IMemoryCache cache,
+    IOptions<TenancyOptions> options,
+    ICacheInvalidationBus? invalidationBus = null)
 {
     /// <param name="domain">Normalised (lowercase, no port) host name.</param>
     public async Task<TenantInfo?> FindByDomainAsync(string domain, CancellationToken cancellationToken)
     {
-        var key = $"tenant:{domain}";
+        var key = CacheInvalidationKeys.TenantDomain(domain);
         if (cache.TryGetValue(key, out CachedTenant? cached))
         {
             return cached!.Tenant;
@@ -33,7 +38,7 @@ public sealed class TenantStore(CatalogDbContext catalog, IMemoryCache cache, IO
     /// <summary>Same as <see cref="FindByDomainAsync"/> but by id (e.g. the tenant a token or OAuth client belongs to).</summary>
     public async Task<TenantInfo?> FindByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        var key = $"tenant-id:{id}";
+        var key = CacheInvalidationKeys.TenantId(id);
         if (cache.TryGetValue(key, out CachedTenant? cached))
         {
             return cached!.Tenant;
@@ -49,14 +54,23 @@ public sealed class TenantStore(CatalogDbContext catalog, IMemoryCache cache, IO
         return tenant;
     }
 
-    /// <summary>Evicts cached lookup entries for a domain and (optionally) tenant id after provisioning or updates.</summary>
+    /// <summary>Evicts local cached lookup entries for a domain and (optionally) tenant id.</summary>
     public void Invalidate(string domain, Guid? tenantId = null)
     {
-        domain = domain.Trim().ToLowerInvariant();
-        cache.Remove($"tenant:{domain}");
+        cache.Remove(CacheInvalidationKeys.TenantDomain(domain));
         if (tenantId is { } id)
         {
-            cache.Remove($"tenant-id:{id}");
+            cache.Remove(CacheInvalidationKeys.TenantId(id));
+        }
+    }
+
+    /// <summary>Evicts cached lookup entries locally and notifies other host instances via <see cref="ICacheInvalidationBus"/>.</summary>
+    public async Task InvalidateAsync(string domain, Guid? tenantId = null, CancellationToken ct = default)
+    {
+        Invalidate(domain, tenantId);
+        if (invalidationBus is not null)
+        {
+            await invalidationBus.PublishTenantAsync(domain, tenantId, ct);
         }
     }
 

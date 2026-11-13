@@ -125,7 +125,7 @@ public sealed partial class TenantProvisioningService(
                 await migrations.MigrateTenantAsync(new TenantInfo(tenant.Id, domain, true, siloConnectionString, true), ct);
             }
 
-            tenants.Invalidate(domain, tenant.Id);
+            await tenants.InvalidateAsync(domain, tenant.Id, ct);
             await clients.SynchronizeTenantAsync(tenant.Id, ct);
 
             var now = time.GetUtcNow();
@@ -147,7 +147,7 @@ public sealed partial class TenantProvisioningService(
                     actorId: actorId ?? existingOwner.Id,
                     data: new { name, domain, isolated = isSilo });
                 await authDb.SaveChangesAsync(ct);
-                access.Invalidate(tenant.Id, existingOwner.Id);
+                await access.InvalidateAsync(tenant.Id, existingOwner.Id, ct);
             }
             else
             {
@@ -243,7 +243,7 @@ public sealed partial class TenantProvisioningService(
         catalog.ChangeTracker.Clear();
         await catalog.TenantDomains.Where(d => d.TenantId == tenantId).ExecuteDeleteAsync(CancellationToken.None);
         await catalog.Tenants.Where(t => t.Id == tenantId).ExecuteDeleteAsync(CancellationToken.None);
-        tenants.Invalidate(domain, tenantId);
+        await tenants.InvalidateAsync(domain, tenantId, CancellationToken.None);
     }
 
     [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")]
