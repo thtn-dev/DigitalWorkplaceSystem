@@ -67,6 +67,39 @@ public class ArchitectureTests
         Assert.True(result.IsSuccessful, $"Shell.Core must not use Shell.Identity: {string.Join(", ", result.FailingTypeNames ?? [])}");
     }
 
+    [Fact]
+    public void Every_module_project_in_source_tree_is_loaded()
+    {
+        var modulesRoot = FindModulesSourceDirectory();
+        var projectNames = Directory.EnumerateFiles(modulesRoot, $"{ModuleLoader.AssemblyPrefix}*.csproj", SearchOption.AllDirectories)
+            .Select(path => Path.GetFileNameWithoutExtension(path)!)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var loadedNames = ModuleAssemblies.Concat(ContractAssemblies)
+            .Select(a => a.GetName().Name!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.NotEmpty(projectNames);
+        Assert.Equal(projectNames, loadedNames);
+    }
+
+    private static string FindModulesSourceDirectory()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "src", "Modules");
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new DirectoryNotFoundException("Could not locate 'src/Modules' from AppContext.BaseDirectory.");
+    }
+
     // Full type names (not namespaces): NetArchTest matches by prefix, so the namespace
     // "Modules.Billing" would also match "Modules.Billing.Contracts", which is allowed.
     private static IEnumerable<string> ImplementationTypeNames(Assembly assembly) =>

@@ -16,8 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Shell.Core\Shell.Core.csproj" />
-    <!-- Module assemblies must be in the output for discovery and architecture tests. -->
-    <ProjectReference Include="..\..\src\Modules\Products\Modules.Products.csproj" />
+    <!-- Automatically reference all module and contract projects so new modules can never be skipped by ArchitectureTests. -->
+    <ProjectReference Include="..\..\src\Modules\*\*.csproj" />
   </ItemGroup>
 
 </Project>
