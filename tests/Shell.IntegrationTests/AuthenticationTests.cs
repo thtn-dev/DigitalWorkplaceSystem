@@ -217,6 +217,22 @@ public class AuthenticationTests(PostgresFixture db)
         Assert.False(swaggerResponse.Headers.Contains("Content-Security-Policy"));
     }
 
+    [Fact]
+    public async Task Hsts_is_omitted_on_plain_http_even_when_https_is_required()
+    {
+        await using var host = db.CreateHost(new Dictionary<string, string?>
+        {
+            ["Identity:RequireHttps"] = "true",
+        });
+        var plainHttpClient = host.CreateClient(new() { BaseAddress = new Uri($"http://{ShellHostFactory.AuthHost}") });
+
+        var response = await plainHttpClient.GetAsync("/health/live", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.False(response.Headers.Contains("Strict-Transport-Security"));
+    }
+
     private Task SetMembershipStatusAsync(string email, Guid tenantId, string status) => db.ExecuteAsync($"""
         UPDATE identity.tenant_memberships SET status = '{status}'
         WHERE tenant_id = '{tenantId}' AND user_id = (SELECT id FROM identity.users WHERE email = '{email}')

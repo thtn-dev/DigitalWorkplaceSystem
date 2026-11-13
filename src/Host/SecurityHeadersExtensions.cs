@@ -24,7 +24,7 @@ public static class SecurityHeadersExtensions
                 headers.ContentSecurityPolicy = DefaultCsp;
             }
 
-            if (requireHttps)
+            if (requireHttps && context.Request.IsHttps)
             {
                 headers.StrictTransportSecurity = "max-age=31536000; includeSubDomains";
             }
