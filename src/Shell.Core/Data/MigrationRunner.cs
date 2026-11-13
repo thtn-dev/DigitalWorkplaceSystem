@@ -63,6 +63,17 @@ public sealed class MigrationRunner(
         }
     }
 
+    /// <summary>Creates and migrates the isolated database of a single Silo tenant (no-op for Pool tenants).</summary>
+    public async Task MigrateTenantAsync(TenantInfo tenant, CancellationToken cancellationToken)
+    {
+        if (!tenant.IsIsolatedDb || string.IsNullOrWhiteSpace(tenant.ConnectionString))
+        {
+            return;
+        }
+
+        await MigrateModulesAsync(tenant, $"database of tenant '{tenant.Identifier}'", cancellationToken);
+    }
+
     /// <summary>The lock lives in the catalog DB, so that DB must exist before anything else.</summary>
     private async Task EnsureCatalogDatabaseExistsAsync(CancellationToken cancellationToken)
     {

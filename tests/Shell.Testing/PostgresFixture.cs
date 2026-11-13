@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using Shell.Abstractions.Tenancy;
 using Shell.Core.Data;
+using Shell.Core.Tenancy;
 using Shell.Identity.Clients;
 using Shell.Identity.Email;
 using Testcontainers.PostgreSql;
@@ -82,8 +84,15 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
 
         await using var scope = host.Services.CreateAsyncScope();
+        if (isIsolatedDb && !string.IsNullOrWhiteSpace(connectionString))
+        {
+            await scope.ServiceProvider.GetRequiredService<MigrationRunner>()
+                .MigrateTenantAsync(new TenantInfo(tenantId, domain, true, connectionString, isActive), CancellationToken.None);
+        }
+
+        scope.ServiceProvider.GetRequiredService<TenantStore>().Invalidate(domain, tenantId);
         await scope.ServiceProvider.GetRequiredService<TenantClientSynchronizer>()
-            .SynchronizeAsync(CancellationToken.None);
+            .SynchronizeTenantAsync(tenantId, CancellationToken.None);
         return (tenantId, domain);
     }
 

@@ -40,17 +40,32 @@ public sealed class TenantClientSynchronizer(
         var tenants = await catalog.Tenants.AsNoTracking().Include(t => t.Domains).ToListAsync(cancellationToken);
         foreach (var tenant in tenants)
         {
-            var descriptor = CreateDescriptor(tenant);
-            var existing = await applications.FindByClientIdAsync(descriptor.ClientId!, cancellationToken);
-            if (existing is null)
-            {
-                await applications.CreateAsync(descriptor, cancellationToken);
-                logger.LogInformation("Created OAuth client {ClientId} for tenant {Tenant}", descriptor.ClientId, tenant.Name);
-            }
-            else
-            {
-                await applications.UpdateAsync(existing, descriptor, cancellationToken);
-            }
+            await UpsertClientAsync(tenant, cancellationToken);
+        }
+    }
+
+    /// <summary>Creates or updates the OAuth client of a single tenant.</summary>
+    public async Task SynchronizeTenantAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var tenant = await catalog.Tenants.AsNoTracking().Include(t => t.Domains)
+            .SingleOrDefaultAsync(t => t.Id == tenantId, cancellationToken)
+            ?? throw new InvalidOperationException($"Tenant '{tenantId}' was not found in catalog.");
+
+        await UpsertClientAsync(tenant, cancellationToken);
+    }
+
+    private async Task UpsertClientAsync(Tenant tenant, CancellationToken cancellationToken)
+    {
+        var descriptor = CreateDescriptor(tenant);
+        var existing = await applications.FindByClientIdAsync(descriptor.ClientId!, cancellationToken);
+        if (existing is null)
+        {
+            await applications.CreateAsync(descriptor, cancellationToken);
+            logger.LogInformation("Created OAuth client {ClientId} for tenant {Tenant}", descriptor.ClientId, tenant.Name);
+        }
+        else
+        {
+            await applications.UpdateAsync(existing, descriptor, cancellationToken);
         }
     }
 

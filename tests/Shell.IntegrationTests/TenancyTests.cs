@@ -138,6 +138,28 @@ public class TenancyTests(PostgresFixture db)
         Assert.Contains("not found", ex.Message);
     }
 
+    [Fact]
+    public async Task Single_tenant_provisioning_helpers_evict_negative_cache_and_migrate_silo_database_on_the_fly()
+    {
+        await using var host = db.CreateHost();
+        var client = host.CreateClient();
+        var domain = $"silo-{Guid.NewGuid():N}.localhost";
+        var siloCs = db.ForDatabase($"shell_silo_{Guid.NewGuid():N}");
+
+        // Prime negative cache in TenantStore with a 404 before the tenant exists.
+        Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(client, HttpMethod.Get, "/api/products", domain)).StatusCode);
+
+        var (tenantId, _) = await db.CreateTenantAsync(host, domain: domain, isIsolatedDb: true, connectionString: siloCs);
+        await db.AddMemberAsync(tenantId, DemoUserSeeder.Alice, role: "owner");
+
+        var tokens = await new OidcTestClient(host).GetTokensAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, tenantId, domain);
+        var productName = $"silo-fly-{Guid.NewGuid()}";
+        await CreateProductAsync(client, domain, productName, tokens.AccessToken);
+
+        Assert.Equal(1, await db.CountAsync(siloCs, $"SELECT count(*) FROM products.products WHERE name = '{productName}'"));
+        Assert.Equal(0, await db.CountAsync(db.SharedConnectionString, $"SELECT count(*) FROM products.products WHERE name = '{productName}'"));
+    }
+
     private async Task<string> AliceTokenAsync(OidcTestClient browser, string domain) =>
         (await browser.GetTokensAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, await db.TenantIdAsync(domain), domain)).AccessToken!;
 
