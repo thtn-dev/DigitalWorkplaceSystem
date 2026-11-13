@@ -114,6 +114,19 @@ public class TenancyTests(PostgresFixture db)
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/products", Ct)).StatusCode); // host "localhost" is no tenant
     }
 
+    [Fact]
+    public async Task Temporary_tenant_helper_provisions_oauth_client_and_membership_for_module_tests()
+    {
+        await using var host = db.CreateHost();
+        var (tenantId, domain) = await db.CreateTenantAsync(host);
+        await db.AddMemberAsync(tenantId, DemoUserSeeder.Bob, role: "owner");
+
+        var tokens = await new OidcTestClient(host).GetTokensAsync(DemoUserSeeder.Bob, DemoUserSeeder.Password, tenantId, domain);
+        var response = await OidcTestClient.CallApiAsync(host, domain, HttpMethod.Get, "/api/products", tokens.AccessToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
     private async Task<string> AliceTokenAsync(OidcTestClient browser, string domain) =>
         (await browser.GetTokensAsync(DemoUserSeeder.Alice, DemoUserSeeder.Password, await db.TenantIdAsync(domain), domain)).AccessToken!;
 

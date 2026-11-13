@@ -6,16 +6,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Shell.Core.Data;
+using Shell.Identity.Clients;
 using Shell.Identity.Email;
 using Testcontainers.PostgreSql;
 
-namespace Shell.IntegrationTests;
-
-[CollectionDefinition(Name)]
-public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>
-{
-    public const string Name = "postgres";
-}
+namespace Shell.Testing;
 
 /// <summary>
 /// One PostgreSQL server for all tests: catalog DB <c>shell_catalog</c> (created by the container),
@@ -58,6 +53,58 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public static Task MigrateAsync(ShellHostFactory host) =>
         host.Services.GetRequiredService<MigrationRunner>().RunAsync(CancellationToken.None);
+
+    /// <summary>Creates a tenant in the catalog DB and registers its OAuth client on <paramref name="host"/>.</summary>
+    public async Task<(Guid Id, string Domain)> CreateTenantAsync(
+        ShellHostFactory host,
+        string? domain = null,
+        bool isActive = true,
+        bool isIsolatedDb = false,
+        string? connectionString = null)
+    {
+        var tenantId = Guid.CreateVersion7();
+        domain ??= $"tenant-{tenantId:N}.localhost";
+        await using var connection = new NpgsqlConnection(CatalogConnectionString);
+        await connection.OpenAsync();
+        await using (var cmd = new NpgsqlCommand(
+            "INSERT INTO catalog.tenants (id, name, is_active, is_isolated_db, connection_string) VALUES (@id, @name, @active, @isolated, @cs);" +
+            "INSERT INTO catalog.tenant_domains (id, tenant_id, domain) VALUES (@domainId, @id, @domain);",
+            connection))
+        {
+            cmd.Parameters.AddWithValue("id", tenantId);
+            cmd.Parameters.AddWithValue("name", domain);
+            cmd.Parameters.AddWithValue("active", isActive);
+            cmd.Parameters.AddWithValue("isolated", isIsolatedDb);
+            cmd.Parameters.AddWithValue("cs", (object?)connectionString ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("domainId", Guid.CreateVersion7());
+            cmd.Parameters.AddWithValue("domain", domain);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        await using var scope = host.Services.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<TenantClientSynchronizer>()
+            .SynchronizeAsync(CancellationToken.None);
+        return (tenantId, domain);
+    }
+
+    /// <summary>Adds or updates a membership for the user with <paramref name="email"/> in <paramref name="tenantId"/>.</summary>
+    public async Task AddMemberAsync(Guid tenantId, string email, string role = "member", string status = "active")
+    {
+        await using var connection = new NpgsqlConnection(CatalogConnectionString);
+        await connection.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            """
+            INSERT INTO identity.tenant_memberships (tenant_id, user_id, role, status, created_at, updated_at)
+            SELECT @tenantId, id, @role, @status, now(), now() FROM identity.users WHERE email = @email
+            ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, status = EXCLUDED.status, updated_at = now()
+            """,
+            connection);
+        cmd.Parameters.AddWithValue("tenantId", tenantId);
+        cmd.Parameters.AddWithValue("email", email);
+        cmd.Parameters.AddWithValue("role", role);
+        cmd.Parameters.AddWithValue("status", status);
+        await cmd.ExecuteNonQueryAsync();
+    }
 
     public async Task<long> CountAsync(string connectionString, string sql)
     {

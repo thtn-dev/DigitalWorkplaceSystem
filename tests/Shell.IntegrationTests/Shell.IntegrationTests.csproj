@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="Shell.Testing" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Host\Host.csproj" />
+    <ProjectReference Include="..\Shell.Testing\Shell.Testing.csproj" />
   </ItemGroup>
 
 </Project>

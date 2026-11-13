@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Shell.Identity.Email;
 
-namespace Shell.IntegrationTests;
+namespace Shell.Testing;
 
 /// <summary>Keeps the links the application would have emailed, per recipient.</summary>
 public sealed class TestEmailSender : IAccountEmailSender

@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Shell.Core.Tenancy;
 using Shell.Identity.Clients;
 
-namespace Shell.IntegrationTests;
+namespace Shell.Testing;
 
 /// <summary>
 /// Plays a tenant SPA against the authorization server: Authorization Code + PKCE through the real login page
