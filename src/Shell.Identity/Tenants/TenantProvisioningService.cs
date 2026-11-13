@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using OpenIddict.Abstractions;
 using Shell.Abstractions.Security;
 using Shell.Abstractions.Tenancy;
 using Shell.Core;
@@ -41,6 +42,7 @@ public sealed partial class TenantProvisioningService(
     TenantStore tenants,
     MigrationRunner migrations,
     TenantClientSynchronizer clients,
+    IOpenIddictApplicationManager applications,
     AuditLog audit,
     TimeProvider time,
     IOptions<TenancyOptions> tenancyOptions,
@@ -116,54 +118,62 @@ public sealed partial class TenantProvisioningService(
         catalog.Tenants.Add(tenant);
         await catalog.SaveChangesAsync(ct);
 
-        if (isSilo)
+        try
         {
-            await migrations.MigrateTenantAsync(new TenantInfo(tenant.Id, domain, true, siloConnectionString, true), ct);
-        }
-
-        tenants.Invalidate(domain, tenant.Id);
-        await clients.SynchronizeTenantAsync(tenant.Id, ct);
-
-        var now = time.GetUtcNow();
-        if (existingOwner is not null)
-        {
-            authDb.Memberships.Add(new TenantMembership
+            if (isSilo)
             {
-                TenantId = tenant.Id,
-                UserId = existingOwner.Id,
-                Role = TenantRoles.Owner,
-                Status = MembershipStatus.Active,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
-            audit.Add(
-                AuditEvents.TenantCreated,
-                userId: existingOwner.Id,
-                tenantId: tenant.Id,
-                actorId: actorId ?? existingOwner.Id,
-                data: new { name, domain, isolated = isSilo });
-            await authDb.SaveChangesAsync(ct);
-            access.Invalidate(tenant.Id, existingOwner.Id);
-        }
-        else
-        {
-            audit.Add(
-                AuditEvents.TenantCreated,
-                tenantId: tenant.Id,
-                actorId: actorId,
-                data: new { name, domain, isolated = isSilo, invitedOwner = users.NormalizeEmail(ownerEmail) });
-            await authDb.SaveChangesAsync(ct);
-
-            var (inviteResult, _) = await memberships.InviteAsync(
-                tenant.Id,
-                ownerEmail,
-                TenantRoles.Owner,
-                new IamActor(actorId ?? Guid.Empty, TenantRoles.Owner),
-                ct);
-            if (inviteResult.Outcome != IamOutcome.Ok)
-            {
-                return new(TenantProvisioningOutcome.Invalid, inviteResult.Detail);
+                await migrations.MigrateTenantAsync(new TenantInfo(tenant.Id, domain, true, siloConnectionString, true), ct);
             }
+
+            tenants.Invalidate(domain, tenant.Id);
+            await clients.SynchronizeTenantAsync(tenant.Id, ct);
+
+            var now = time.GetUtcNow();
+            if (existingOwner is not null)
+            {
+                authDb.Memberships.Add(new TenantMembership
+                {
+                    TenantId = tenant.Id,
+                    UserId = existingOwner.Id,
+                    Role = TenantRoles.Owner,
+                    Status = MembershipStatus.Active,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+                audit.Add(
+                    AuditEvents.TenantCreated,
+                    userId: existingOwner.Id,
+                    tenantId: tenant.Id,
+                    actorId: actorId ?? existingOwner.Id,
+                    data: new { name, domain, isolated = isSilo });
+                await authDb.SaveChangesAsync(ct);
+                access.Invalidate(tenant.Id, existingOwner.Id);
+            }
+            else
+            {
+                var (inviteResult, _) = await memberships.InviteAsync(
+                    tenant.Id,
+                    ownerEmail,
+                    TenantRoles.Owner,
+                    new IamActor(actorId ?? Guid.Empty, TenantRoles.Owner),
+                    ct);
+                if (inviteResult.Outcome != IamOutcome.Ok)
+                {
+                    await CompensateAsync(tenant.Id, domain);
+                    return new(TenantProvisioningOutcome.Invalid, inviteResult.Detail);
+                }
+
+                await audit.RecordAsync(
+                    AuditEvents.TenantCreated,
+                    tenantId: tenant.Id,
+                    actorId: actorId,
+                    data: new { name, domain, isolated = isSilo, invitedOwner = users.NormalizeEmail(ownerEmail) });
+            }
+        }
+        catch
+        {
+            await CompensateAsync(tenant.Id, domain);
+            throw;
         }
 
         return new(TenantProvisioningOutcome.Ok, TenantId: tenant.Id, Domain: domain);
@@ -198,6 +208,10 @@ public sealed partial class TenantProvisioningService(
             return new(TenantProvisioningOutcome.Conflict, $"Subdomain '{subdomainSlug}' is reserved.");
         }
 
+        await using var tx = await authDb.Database.BeginTransactionAsync(ct);
+        var lockKey = $"trial:{owner.Id:D}";
+        await authDb.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtext({lockKey}))", ct);
+
         var maxTenants = identityOptions.Value.MaxTenantsPerUser;
         var ownedCount = await authDb.Memberships.CountAsync(
             m => m.UserId == owner.Id && m.Role == TenantRoles.Owner && m.Status == MembershipStatus.Active,
@@ -209,7 +223,27 @@ public sealed partial class TenantProvisioningService(
 
         var baseDomain = identityOptions.Value.SelfSignUpBaseDomain.Trim().TrimStart('.').ToLowerInvariant();
         var domain = $"{subdomainSlug}.{baseDomain}";
-        return await ProvisionAsync(name, domain, owner.Email, siloConnectionString: null, actorId: owner.Id, ct);
+        var result = await ProvisionAsync(name, domain, owner.Email, siloConnectionString: null, actorId: owner.Id, ct);
+        if (result.Outcome == TenantProvisioningOutcome.Ok)
+        {
+            await tx.CommitAsync(ct);
+        }
+
+        return result;
+    }
+
+    private async Task CompensateAsync(Guid tenantId, string domain)
+    {
+        var app = await applications.FindByClientIdAsync(TenantClients.ClientIdFor(tenantId), CancellationToken.None);
+        if (app is not null)
+        {
+            await applications.DeleteAsync(app, CancellationToken.None);
+        }
+
+        catalog.ChangeTracker.Clear();
+        await catalog.TenantDomains.Where(d => d.TenantId == tenantId).ExecuteDeleteAsync(CancellationToken.None);
+        await catalog.Tenants.Where(t => t.Id == tenantId).ExecuteDeleteAsync(CancellationToken.None);
+        tenants.Invalidate(domain, tenantId);
     }
 
     [GeneratedRegex("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")]

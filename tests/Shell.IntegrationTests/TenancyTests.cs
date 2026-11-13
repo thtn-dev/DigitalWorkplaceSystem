@@ -1,9 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Modules.Products.Contracts;
 using Shell.Core.Tenancy;
 using Shell.Identity;
 using Shell.Identity.Data;
+using Shell.Identity.Tenants;
 
 namespace Shell.IntegrationTests;
 
@@ -264,6 +267,77 @@ public class TenancyTests(PostgresFixture db)
             new() { ["Name"] = "Second Workspace", ["Subdomain"] = secondSlug },
             tokenPage: "/tenants/new");
         Assert.Contains("at most 1", await quotaPost.Content.ReadAsStringAsync(Ct), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Create_tenant_cli_preserves_trailing_silo_flag_for_error_reporting()
+    {
+        await using var host = db.CreateHost();
+        var (commandArgs, hostArgs) = Program.ParseCliArgs(["create-tenant", "Acme", "acme.localhost", DemoUserSeeder.Bob, "--silo"]);
+
+        Assert.NotNull(commandArgs);
+        Assert.Empty(hostArgs);
+        Assert.Contains("--silo", commandArgs);
+        Assert.Equal(1, await IdentityCommands.RunAsync(host.Services, commandArgs, Ct));
+        Assert.Equal(0, await db.CountAsync(db.CatalogConnectionString, "SELECT count(*) FROM catalog.tenant_domains WHERE domain = 'acme.localhost'"));
+    }
+
+    [Fact]
+    public async Task ProvisionAsync_rolls_back_catalog_records_when_silo_migration_fails()
+    {
+        await using var host = db.CreateHost();
+        var domain = $"rollback-{Guid.NewGuid():N}.localhost";
+        var brokenCs = "Host=127.0.0.1;Port=1;Database=broken_silo;Username=postgres;Password=postgres;Timeout=1";
+
+        await using var scope = host.Services.CreateAsyncScope();
+        var provisioning = scope.ServiceProvider.GetRequiredService<TenantProvisioningService>();
+
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            provisioning.ProvisionAsync("Broken Silo", domain, DemoUserSeeder.Bob, brokenCs, actorId: null, Ct));
+
+        Assert.Equal(0, await db.CountAsync(db.CatalogConnectionString, $"SELECT count(*) FROM catalog.tenant_domains WHERE domain = '{domain}'"));
+        Assert.Equal(0, await db.CountAsync(db.CatalogConnectionString, "SELECT count(*) FROM catalog.tenants WHERE name = 'Broken Silo'"));
+
+        // Retrying the same domain with a working DB succeeds without conflict.
+        var validCs = db.ForDatabase($"shell_recovered_{Guid.NewGuid():N}");
+        var retry = await provisioning.ProvisionAsync("Recovered Silo", domain, DemoUserSeeder.Bob, validCs, actorId: null, Ct);
+        Assert.Equal(TenantProvisioningOutcome.Ok, retry.Outcome);
+    }
+
+    [Fact]
+    public async Task Concurrent_trial_signup_requests_respect_MaxTenantsPerUser_quota()
+    {
+        await using var host = db.CreateHost(new Dictionary<string, string?>
+        {
+            ["Identity:SelfSignUpBaseDomain"] = "localhost",
+            ["Identity:MaxTenantsPerUser"] = "1",
+        });
+
+        var email = $"race-{Guid.NewGuid():N}@test.local";
+        var browser = new OidcTestClient(host);
+        await browser.RegisterAsync(email, DemoUserSeeder.Password);
+        await browser.GetPageAsync(db.Emails.LastLinkTo(email));
+
+        await using var lookupScope = host.Services.CreateAsyncScope();
+        var owner = await lookupScope.ServiceProvider.GetRequiredService<AuthDbContext>().Users
+            .AsNoTracking()
+            .SingleAsync(u => u.Email == email, Ct);
+
+        var slug1 = $"r1-{Guid.NewGuid():N}"[..20];
+        var slug2 = $"r2-{Guid.NewGuid():N}"[..20];
+
+        async Task<TenantProvisioningResult> AttemptAsync(string slug)
+        {
+            await using var scope = host.Services.CreateAsyncScope();
+            var service = scope.ServiceProvider.GetRequiredService<TenantProvisioningService>();
+            return await service.CreateTrialAsync(owner, $"Race {slug}", slug, Ct);
+        }
+
+        var results = await Task.WhenAll(AttemptAsync(slug1), AttemptAsync(slug2));
+        Assert.Equal(1, results.Count(r => r.Outcome == TenantProvisioningOutcome.Ok));
+        Assert.Equal(1, results.Count(r => r.Outcome == TenantProvisioningOutcome.Forbidden));
+        Assert.Equal(1, await db.CountAsync(db.CatalogConnectionString,
+            $"SELECT count(*) FROM identity.tenant_memberships WHERE user_id = '{owner.Id}'"));
     }
 
     private async Task<string> AliceTokenAsync(OidcTestClient browser, string domain) =>

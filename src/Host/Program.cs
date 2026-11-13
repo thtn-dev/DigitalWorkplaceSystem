@@ -22,35 +22,7 @@ try
     //   migrate                                                        migrate (and optionally seed) the databases; never done on normal start-up
     //   disable-user <email> | enable-user <email>                     block/allow sign-in and revoke every grant
     //   create-tenant <name> <domain> <owner-email> [--silo <cs>]      create a Pool or Silo tenant and assign/invite its owner
-    string[]? commandArgs;
-    string[] hostArgs;
-    switch (args)
-    {
-        case ["migrate", .. var rest]:
-            commandArgs = ["migrate"];
-            hostArgs = rest;
-            break;
-        case [var name and ("disable-user" or "enable-user"), var value, .. var rest]:
-            commandArgs = [name, value];
-            hostArgs = rest;
-            break;
-        case ["create-tenant", var name, var domain, var ownerEmail, "--silo", var cs, .. var rest]:
-            commandArgs = ["create-tenant", name, domain, ownerEmail, "--silo", cs];
-            hostArgs = rest;
-            break;
-        case ["create-tenant", var name, var domain, var ownerEmail, .. var rest]:
-            commandArgs = ["create-tenant", name, domain, ownerEmail];
-            hostArgs = rest;
-            break;
-        case ["create-tenant", ..]:
-            commandArgs = args;
-            hostArgs = [];
-            break;
-        default:
-            commandArgs = null;
-            hostArgs = args;
-            break;
-    }
+    var (commandArgs, hostArgs) = ParseCliArgs(args);
     var builder = WebApplication.CreateBuilder(hostArgs);
 
     builder.Services.AddSerilog(
@@ -149,4 +121,13 @@ finally
     await Log.CloseAndFlushAsync();
 }
 
-public partial class Program;
+public partial class Program
+{
+    public static (string[]? CommandArgs, string[] HostArgs) ParseCliArgs(string[] args) => args switch
+    {
+        ["migrate", .. var rest] => (["migrate"], rest),
+        [var name and ("disable-user" or "enable-user"), var value, .. var rest] => ([name, value], rest),
+        ["create-tenant", ..] => (args, []),
+        _ => (null, args),
+    };
+}
