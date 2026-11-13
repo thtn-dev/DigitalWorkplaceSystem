@@ -52,6 +52,7 @@ public sealed class TenantStore(CatalogDbContext catalog, IMemoryCache cache, IO
     /// <summary>Evicts cached lookup entries for a domain and (optionally) tenant id after provisioning or updates.</summary>
     public void Invalidate(string domain, Guid? tenantId = null)
     {
+        domain = domain.Trim().ToLowerInvariant();
         cache.Remove($"tenant:{domain}");
         if (tenantId is { } id)
         {

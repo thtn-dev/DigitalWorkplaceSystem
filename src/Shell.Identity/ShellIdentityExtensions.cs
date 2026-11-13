@@ -59,7 +59,7 @@ public static class ShellIdentityExtensions
                 "Identity:Clients redirect URIs must contain {domain}.")
             .Validate(o => !o.Email.IsConfigured || (o.Email.Port is >= 1 and <= 65535 && !string.IsNullOrWhiteSpace(o.Email.FromAddress) && o.Email.FromAddress.Contains('@', StringComparison.Ordinal)),
                 "Identity:Email requires a valid FromAddress and Port (1..65535) when Identity:Email:Host is set.")
-            .Validate(o => !string.IsNullOrWhiteSpace(o.SelfSignUpBaseDomain) && !o.SelfSignUpBaseDomain.Contains('/', StringComparison.Ordinal),
+            .Validate(o => !string.IsNullOrWhiteSpace(o.SelfSignUpBaseDomain) && Uri.CheckHostName(o.SelfSignUpBaseDomain.Trim().TrimStart('.')) == UriHostNameType.Dns,
                 "Identity:SelfSignUpBaseDomain must be a valid host suffix.")
             .ValidateOnStart();
 

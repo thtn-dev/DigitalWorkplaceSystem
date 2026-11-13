@@ -176,18 +176,24 @@ public partial class AccountSecurityTests(PostgresFixture db)
         var link = db.Emails.LastLinkTo(email);
         Assert.StartsWith("/account/confirm-email?", link, StringComparison.Ordinal);
 
-        // Forged token is rejected.
+        // Forged token is rejected on POST.
         var forged = Regex.Replace(link, "token=[^&]+", "token=forged");
-        var forgedHtml = await browser.GetPageAsync(forged);
-        Assert.Contains("invalid or expired", forgedHtml);
+        var forgedPost = await browser.PostFormAsync(forged, new(), tokenPage: forged);
+        Assert.Contains("invalid or expired", await forgedPost.Content.ReadAsStringAsync(Ct));
         Assert.Equal("false", await db.ScalarAsync($"SELECT email_confirmed::text FROM identity.users WHERE email = '{email}'"));
 
         // Resend confirmation link from home page works and issues a valid link.
         await browser.PostFormAsync("/?handler=ResendConfirmation", new(), tokenPage: "/");
         link = db.Emails.LastLinkTo(email);
 
-        var confirmedHtml = await browser.GetPageAsync(link);
-        Assert.Contains("id=\"email-confirmed\"", confirmedHtml);
+        // GET renders confirmation form without consuming the single-use token (safe against link prefetchers).
+        var getHtml = await browser.GetPageAsync(link);
+        Assert.Contains("type=\"submit\"", getHtml);
+        Assert.Equal("false", await db.ScalarAsync($"SELECT email_confirmed::text FROM identity.users WHERE email = '{email}'"));
+
+        // POST consumes the token and confirms the email.
+        var confirmedPost = await browser.PostFormAsync(link, new(), tokenPage: link);
+        Assert.Contains("id=\"email-confirmed\"", await confirmedPost.Content.ReadAsStringAsync(Ct));
         Assert.Equal("true", await db.ScalarAsync($"SELECT email_confirmed::text FROM identity.users WHERE email = '{email}'"));
 
         var userId = await db.ScalarAsync($"SELECT id::text FROM identity.users WHERE email = '{email}'");
@@ -293,6 +299,31 @@ public partial class AccountSecurityTests(PostgresFixture db)
 
             var ex = Assert.Throws<OptionsValidationException>(() => _ = provider.GetRequiredService<IOptions<ShellIdentityOptions>>().Value);
             Assert.Contains("Identity:Email", ex.Message);
+        }
+    }
+
+    [Fact]
+    public void Invalid_self_signup_base_domain_fails_fast_at_startup()
+    {
+        foreach (var badDomain in new[] { "localhost:5080", "bad/host", "bad host", "" })
+        {
+            var config = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:Catalog"] = db.CatalogConnectionString,
+                    ["ConnectionStrings:DefaultShared"] = db.SharedConnectionString,
+                    ["Identity:Issuer"] = $"http://{ShellHostFactory.AuthHost}/",
+                    ["Identity:SelfSignUpBaseDomain"] = badDomain,
+                })
+                .Build();
+            var services = new ServiceCollection();
+            services.AddSingleton<IConfiguration>(config);
+            services.AddShell(config, ModuleCatalog.Build([]));
+            services.AddShellIdentity(config);
+            using var provider = services.BuildServiceProvider();
+
+            var ex = Assert.Throws<OptionsValidationException>(() => _ = provider.GetRequiredService<IOptions<ShellIdentityOptions>>().Value);
+            Assert.Contains("Identity:SelfSignUpBaseDomain", ex.Message);
         }
     }
 

@@ -18,3 +18,12 @@ else if (Model.Confirmed)
         <a href="/">Account</a>
     </p>
 }
+else
+{
+    <p>Click below to confirm your email address.</p>
+    <form method="post">
+        <input type="hidden" name="UserId" value="@Model.UserId" />
+        <input type="hidden" name="Token" value="@Model.Token" />
+        <button type="submit">Confirm email</button>
+    </form>
+}

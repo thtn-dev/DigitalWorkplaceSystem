@@ -30,9 +30,9 @@ else
         <input id="name" name="Name" type="text" value="@Model.Name" required maxlength="200" />
 
         <label for="subdomain">Subdomain (<code>&lt;subdomain&gt;.@Model.BaseDomain</code>)</label>
-        <input id="subdomain" name="Subdomain" type="text" value="@Model.Subdomain" required maxlength="63" pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" />
+        <input id="subdomain" name="Subdomain" type="text" value="@Model.Subdomain" required minlength="2" maxlength="63" pattern="[a-z0-9][a-z0-9-]{0,61}[a-z0-9]" />
 
-        <button type="submit">Create workspace</button>
+        <button type="submit" disabled="@(!Model.EmailConfirmed)">Create workspace</button>
     </form>
     <p class="links"><a href="/">Back to account</a></p>
 }

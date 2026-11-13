@@ -229,7 +229,12 @@ public class TenancyTests(PostgresFixture db)
         // 1. /tenants/new is an auth-host-only route: tenant hosts get 404.
         Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(client, HttpMethod.Get, "/tenants/new", TenantA)).StatusCode);
 
-        // 2. Unconfirmed user cannot provision a workspace.
+        // 2. Unconfirmed user sees disabled submit button, >=2 char subdomain constraints, and cannot provision a workspace.
+        var newPageHtml = await browser.GetPageAsync("/tenants/new");
+        Assert.Contains("minlength=\"2\"", newPageHtml);
+        Assert.Contains("pattern=\"[a-z0-9][a-z0-9-]{0,61}[a-z0-9]\"", newPageHtml);
+        Assert.Contains("disabled", newPageHtml);
+
         var slug = $"trial-{Guid.NewGuid():N}"[..20];
         var unconfirmedPost = await browser.PostFormAsync(
             "/tenants/new",
@@ -237,8 +242,9 @@ public class TenancyTests(PostgresFixture db)
             tokenPage: "/tenants/new");
         Assert.Contains("confirm your email", await unconfirmedPost.Content.ReadAsStringAsync(Ct), StringComparison.OrdinalIgnoreCase);
 
-        // 3. Confirm email, then verify reserved slugs ("auth", "admin") are rejected.
-        Assert.Contains("id=\"email-confirmed\"", await browser.GetPageAsync(confirmLink));
+        // 3. Confirm email via POST, then verify reserved slugs ("auth", "admin") are rejected.
+        var confirmPost = await browser.PostFormAsync(confirmLink, new(), tokenPage: confirmLink);
+        Assert.Contains("id=\"email-confirmed\"", await confirmPost.Content.ReadAsStringAsync(Ct));
         var reservedPost = await browser.PostFormAsync(
             "/tenants/new",
             new() { ["Name"] = "Reserved Co", ["Subdomain"] = "admin" },
@@ -316,7 +322,8 @@ public class TenancyTests(PostgresFixture db)
         var email = $"race-{Guid.NewGuid():N}@test.local";
         var browser = new OidcTestClient(host);
         await browser.RegisterAsync(email, DemoUserSeeder.Password);
-        await browser.GetPageAsync(db.Emails.LastLinkTo(email));
+        var confirmLink = db.Emails.LastLinkTo(email);
+        await browser.PostFormAsync(confirmLink, new(), tokenPage: confirmLink);
 
         await using var lookupScope = host.Services.CreateAsyncScope();
         var owner = await lookupScope.ServiceProvider.GetRequiredService<AuthDbContext>().Users
@@ -338,6 +345,35 @@ public class TenancyTests(PostgresFixture db)
         Assert.Equal(1, results.Count(r => r.Outcome == TenantProvisioningOutcome.Forbidden));
         Assert.Equal(1, await db.CountAsync(db.CatalogConnectionString,
             $"SELECT count(*) FROM identity.tenant_memberships WHERE user_id = '{owner.Id}'"));
+    }
+
+    [Fact]
+    public async Task TenantStore_Invalidate_normalizes_domain_casing_and_whitespace()
+    {
+        await using var host = db.CreateHost();
+        var domain = $"inval-{Guid.NewGuid():N}.localhost";
+
+        await using var scope = host.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<TenantStore>();
+        var catalog = scope.ServiceProvider.GetRequiredService<CatalogDbContext>();
+
+        // Populate negative cache entry.
+        Assert.Null(await store.FindByDomainAsync(domain, Ct));
+
+        // Insert tenant + domain directly so ProvisionAsync does not invalidate for us.
+        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "Invalidate Test", IsActive = true };
+        catalog.Tenants.Add(tenant);
+        catalog.TenantDomains.Add(new TenantDomain { Id = Guid.NewGuid(), TenantId = tenant.Id, Domain = domain });
+        await catalog.SaveChangesAsync(Ct);
+
+        // Still cached as null before Invalidate.
+        Assert.Null(await store.FindByDomainAsync(domain, Ct));
+
+        // Invalidate with mixed casing and surrounding whitespace must evict the normalized key.
+        store.Invalidate($"  {domain.ToUpperInvariant()}  ", tenant.Id);
+        var resolved = await store.FindByDomainAsync(domain, Ct);
+        Assert.NotNull(resolved);
+        Assert.Equal(tenant.Id, resolved.Id);
     }
 
     private async Task<string> AliceTokenAsync(OidcTestClient browser, string domain) =>

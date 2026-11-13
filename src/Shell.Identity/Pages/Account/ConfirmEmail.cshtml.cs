@@ -8,26 +8,42 @@ namespace Shell.Identity.Pages.Account;
 
 public sealed class ConfirmEmailModel(UserManager<User> users, AuditLog audit) : PageModel
 {
+    [BindProperty(SupportsGet = true)]
+    public Guid UserId { get; set; }
+
+    [BindProperty(SupportsGet = true)]
+    public string? Token { get; set; }
+
     public bool Confirmed { get; private set; }
 
     public string? Error { get; private set; }
 
-    public async Task<IActionResult> OnGetAsync(Guid userId, string? token)
+    public IActionResult OnGet()
     {
-        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(token))
+        if (UserId == Guid.Empty || string.IsNullOrWhiteSpace(Token))
+        {
+            Error = "This confirmation link is invalid or expired.";
+        }
+
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostAsync()
+    {
+        if (UserId == Guid.Empty || string.IsNullOrWhiteSpace(Token))
         {
             Error = "This confirmation link is invalid or expired.";
             return Page();
         }
 
-        var user = await users.FindByIdAsync(userId.ToString());
+        var user = await users.FindByIdAsync(UserId.ToString());
         if (user is null)
         {
             Error = "This confirmation link is invalid or expired.";
             return Page();
         }
 
-        var result = await users.ConfirmEmailAsync(user, token);
+        var result = await users.ConfirmEmailAsync(user, Token);
         if (!result.Succeeded)
         {
             Error = "This confirmation link is invalid or expired.";
